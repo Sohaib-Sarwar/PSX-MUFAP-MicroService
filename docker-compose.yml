@@ -1,49 +1,34 @@
-# ═══════════════════════════════════════════════════════════════
-#  Pakistan Financial Data – Split Services (Docker Compose)
-# ═══════════════════════════════════════════════════════════════
-#
-#  Usage:
-#    docker compose up -d --build         # Build & start both
-#    docker compose logs -f               # Follow live logs
-#    docker compose down                  # Stop everything
-#
-#  Two services:
-#    pk-finance-api      → http://localhost:8000  (Backend API)
-#    pk-finance-frontend → http://localhost:3000  (Frontend Dashboard)
+# Unified service: PSX + MUFAP + dashboard in one container.
+#   docker compose up -d --build
+#   docker compose logs -f
+#   docker compose down
 
 services:
-  pk-finance-api:
-    build:
-      context: ./api-service
-      dockerfile: Dockerfile
-    container_name: pk-finance-api
+  psx-service:
+    build: .
+    container_name: psx-service
     ports:
       - "8000:8000"
     environment:
-      - SCRAPE_INTERVAL_MINUTES=30
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+      SNAPSHOT_STORE: memory
+      SCHEDULER_ENABLED: "true"
+      PSX_INTERVAL_OPEN_SECONDS: "90"
+      PSX_INTERVAL_CLOSED_SECONDS: "1800"
+      # Required for POST /internal/refresh. Override in a .env file.
+      INTERNAL_TOKEN: "${INTERNAL_TOKEN:-change-me-in-production}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
     restart: unless-stopped
+    stop_grace_period: 25s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
-      interval: 60s
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "4",
+             "http://127.0.0.1:8000/health"]
+      interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 90s
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "0.5"
-
-  pk-finance-frontend:
-    build:
-      context: ./frontend-service
-      dockerfile: Dockerfile
-    container_name: pk-finance-frontend
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 32M
-          cpus: "0.1"
+      start_period: 15s
+    mem_limit: 384m
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
