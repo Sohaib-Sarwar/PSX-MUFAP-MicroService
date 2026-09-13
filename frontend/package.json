@@ -1,0 +1,11 @@
+{
+  "name": "pk-finance-frontend",
+  "version": "1.0.0",
+  "description": "Pakistan Financial Data dashboard - static frontend for Railway",
+  "scripts": {
+    "start": "serve -s . -l $PORT"
+  },
+  "dependencies": {
+    "serve": "^14.2.0"
+  }
+}

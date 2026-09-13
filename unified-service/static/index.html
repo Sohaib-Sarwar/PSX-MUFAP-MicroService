@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PK Finance — Dashboard</title>
+
+<!-- PWA -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#4f46e5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PK Finance">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --card: #ffffff;
+    --border: #e8eaed;
+    --border-light: #f0f1f3;
+    --text: #1a1a2e;
+    --text-secondary: #64748b;
+    --muted: #94a3b8;
+    --accent: #4f46e5;
+    --accent-light: #eef2ff;
+    --accent-hover: #4338ca;
+    --green: #10b981;
+    --green-bg: #ecfdf5;
+    --red: #ef4444;
+    --red-bg: #fef2f2;
+    --amber: #f59e0b;
+    --hover: #f8f9fb;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.06), 0 2px 4px -2px rgba(0,0,0,0.04);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.06), 0 4px 6px -4px rgba(0,0,0,0.04);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-xs: 6px;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeScale {
+    from { opacity: 0; transform: scale(0.97); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .5; }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .animate-in { animation: fadeIn .35s cubic-bezier(.22,1,.36,1) both; }
+
+  /* ── NAV ── */
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 32px; height: 64px;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  }
+  .logo {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 17px; font-weight: 700; letter-spacing: -0.4px; color: var(--text);
+  }
+  .logo-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    overflow: hidden; flex-shrink: 0;
+  }
+  .logo-icon img {
+    width: 100%; height: 100%; object-fit: contain;
+  }
+  .logo span { color: var(--muted); font-weight: 400; font-size: 15px; }
+  .nav-tabs { display: flex; gap: 4px; background: var(--bg); border-radius: 10px; padding: 4px; }
+  .nav-tab {
+    padding: 7px 18px; font-size: 13px; font-weight: 500;
+    cursor: pointer; color: var(--text-secondary); border: none;
+    background: transparent; transition: all .2s ease;
+    border-radius: 7px; display: inline-flex; align-items: center; gap: 7px;
+    font-family: inherit; letter-spacing: 0.1px; white-space: nowrap;
+  }
+  .nav-tab svg { width: 15px; height: 15px; stroke-width: 2; opacity: .7; }
+  .nav-tab.active {
+    background: var(--surface); color: var(--text); font-weight: 600;
+    box-shadow: var(--shadow-sm);
+  }
+  .nav-tab.active svg { opacity: 1; color: var(--accent); }
+  .nav-tab:hover:not(.active) { color: var(--text); background: var(--surface); }
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .status-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 20px; font-size: 11px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+    background: var(--bg); color: var(--muted); transition: all .3s;
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--muted); transition: all .3s;
+    flex-shrink: 0;
+  }
+  .status-dot.online { background: var(--green); box-shadow: 0 0 0 3px rgba(16,185,129,.2); }
+
+  /* ── LAYOUT ── */
+  .container { max-width: 1440px; margin: 0 auto; padding: 28px 32px; }
+  .section { display: none; }
+  .section.active { display: block; animation: fadeIn .3s cubic-bezier(.22,1,.36,1) both; }
+
+  /* ── SECTION HEADER ── */
+  .section-header {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+  }
+  .section-header .icon-wrap {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .section-header .icon-wrap.funds { background: var(--accent-light); color: var(--accent); }
+  .section-header .icon-wrap.stocks { background: var(--green-bg); color: var(--green); }
+  .section-header .icon-wrap.indices { background: #fef3c7; color: var(--amber); }
+  .section-header .icon-wrap.config { background: var(--bg); color: var(--text-secondary); }
+  .section-header .icon-wrap svg { width: 20px; height: 20px; }
+  .section-header h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  .section-header p { font-size: 13px; color: var(--text-secondary); margin-top: 1px; }
+
+  /* ── STAT GRID ── */
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px; margin-bottom: 24px;
+  }
+  .stat {
+    background: var(--card); border: 1px solid var(--border-light);
+    border-radius: var(--radius); padding: 18px 20px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow .2s, transform .2s;
+    animation: slideUp .4s cubic-bezier(.22,1,.36,1) both;
+  }
+  .stat:nth-child(1) { animation-delay: 0s; }
+  .stat:nth-child(2) { animation-delay: .04s; }
+  .stat:nth-child(3) { animation-delay: .08s; }
+  .stat:nth-child(4) { animation-delay: .12s; }
+  .stat:nth-child(5) { animation-delay: .16s; }
+  .stat:nth-child(6) { animation-delay: .2s; }
+  .stat:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .stat .label {
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .7px; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .stat .label svg { width: 13px; height: 13px; opacity: .6; }
+  .stat .val { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
+  .stat .val.sm { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+  .stat .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ── TOOLBAR ── */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap;
+  }
+  .btn {
+    padding: 8px 16px; font-size: 13px; font-weight: 500;
+    border: 1px solid var(--border); border-radius: var(--radius-xs);
+    cursor: pointer; background: var(--surface); color: var(--text);
+    transition: all .2s; display: inline-flex; align-items: center; gap: 7px;
+    font-family: inherit; letter-spacing: 0.1px;
+    box-shadow: var(--shadow-sm);
+  }
+  .btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+  .btn:hover { background: var(--hover); border-color: #d1d5db; box-shadow: var(--shadow); }
+  .btn:active { transform: scale(0.98); box-shadow: none; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+    box-shadow: 0 1px 3px rgba(79,70,229,0.3);
+  }
+  .btn.primary:hover { background: var(--accent-hover); box-shadow: 0 4px 8px rgba(79,70,229,0.25); }
+  .btn.primary svg { color: #fff; }
+  .search-wrap {
+    position: relative; display: flex; align-items: center;
+  }
+  .search-wrap svg {
+    position: absolute; left: 12px; width: 15px; height: 15px; color: var(--muted);
+    pointer-events: none;
+  }
+  .search-input {
+    padding: 8px 14px 8px 36px; font-size: 13px; border: 1px solid var(--border);
+    border-radius: var(--radius-xs); background: var(--surface); color: var(--text);
+    outline: none; min-width: 220px; font-family: inherit;
+    box-shadow: var(--shadow-sm); transition: all .2s;
+  }
+  .search-input::placeholder { color: var(--muted); }
+  .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+  .spacer { flex: 1; }
+
+  /* ── FILTER CHIPS ── */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+  .chip {
+    padding: 6px 14px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--border); border-radius: 20px;
+    cursor: pointer; color: var(--text-secondary); background: var(--surface);
+    transition: all .2s; font-family: inherit;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ── TABLE ── */
+  .table-wrap {
+    overflow-x: auto; border: 1px solid var(--border-light);
+    border-radius: var(--radius); box-shadow: var(--shadow-sm);
+    background: var(--surface);
+    animation: fadeScale .3s ease both;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    padding: 12px 16px; text-align: left; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .6px; font-weight: 600;
+    color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--border);
+    cursor: pointer; user-select: none; position: sticky; top: 0; white-space: nowrap;
+    transition: color .15s;
+  }
+  thead th:hover { color: var(--text); }
+  tbody td {
+    padding: 11px 16px; border-bottom: 1px solid var(--border-light);
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { transition: background .15s; }
+  tbody tr:hover { background: var(--hover); }
+  .mono { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; font-size: 12px; }
+  .right { text-align: right; }
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .dim { color: var(--muted); }
+  .bold { font-weight: 600; }
+  .rec-count { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+
+  /* ── MSG ── */
+  .msg-bar {
+    padding: 12px 18px; border-radius: var(--radius-sm); font-size: 13px;
+    margin-bottom: 18px; display: none; border: 1px solid var(--border);
+    background: var(--surface); font-weight: 500;
+    box-shadow: var(--shadow-sm);
+    animation: slideUp .25s ease both;
+  }
+  .msg-bar.show { display: flex; align-items: center; gap: 10px; }
+  .msg-bar.error { border-color: #fecaca; background: var(--red-bg); color: var(--red); }
+  .msg-bar.success { border-color: #a7f3d0; background: var(--green-bg); color: var(--green); }
+  .msg-bar svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .6s linear infinite; flex-shrink: 0;
+  }
+
+  /* ── EMPTY STATE ── */
+  .empty {
+    text-align: center; padding: 64px 24px; color: var(--text-secondary);
+    animation: fadeIn .4s ease both;
+  }
+  .empty .icon {
+    width: 56px; height: 56px; margin: 0 auto 16px;
+    background: var(--bg); border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .empty .icon svg { width: 24px; height: 24px; color: var(--muted); }
+  .empty p { font-size: 14px; line-height: 1.6; }
+  .empty p strong { color: var(--text); font-weight: 600; }
+
+  /* ── INDEX CARDS ── */
+  .idx-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 14px;
+  }
+  .idx-card {
+    background: var(--card); border: 1px solid var(--border-light);
+    border-radius: var(--radius); padding: 18px 20px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow .2s, transform .2s;
+    animation: slideUp .35s cubic-bezier(.22,1,.36,1) both;
+  }
+  .idx-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+  .idx-card .name {
+    font-size: 11px; color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .idx-card .name svg { width: 13px; height: 13px; }
+  .idx-card .val { font-size: 22px; font-weight: 700; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+  .idx-card .chg { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+  .idx-card .chg svg { width: 14px; height: 14px; }
+
+  /* ── CONFIG ── */
+  .config-section { max-width: 720px; }
+  .config-card {
+    background: var(--surface); border: 1px solid var(--border-light);
+    border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
+    box-shadow: var(--shadow-sm);
+    animation: slideUp .35s ease both;
+  }
+  .config-card h3 {
+    font-size: 15px; font-weight: 600; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .config-card h3 svg { width: 18px; height: 18px; color: var(--accent); }
+  .config-field {
+    display: flex; gap: 12px; align-items: center; margin-bottom: 14px;
+  }
+  .config-field:last-child { margin-bottom: 0; }
+  .config-field label {
+    font-size: 12px; color: var(--text-secondary); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .5px; min-width: 80px;
+  }
+  .config-field input {
+    flex: 1; padding: 9px 14px; font-size: 13px; border: 1px solid var(--border);
+    border-radius: var(--radius-xs); background: var(--bg); color: var(--text);
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    outline: none; transition: all .2s;
+  }
+  .config-field input:focus {
+    border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.1);
+    background: var(--surface);
+  }
+
+  /* ── ENDPOINTS TABLE ── */
+  .endpoints-table { margin-top: 4px; }
+  .endpoints-table .method {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .5px;
+  }
+  .endpoints-table .method.get { background: var(--green-bg); color: var(--green); }
+  .endpoints-table .method.post { background: var(--accent-light); color: var(--accent); }
+
+  /* ── SUB-TABS ── */
+  .sub-tabs {
+    display: flex; gap: 4px; background: var(--bg); border-radius: 10px;
+    padding: 4px; margin-bottom: 18px; width: fit-content;
+  }
+  .sub-tab {
+    padding: 7px 16px; font-size: 12px; font-weight: 500;
+    cursor: pointer; color: var(--text-secondary); border: none;
+    background: transparent; transition: all .2s;
+    border-radius: 7px; display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  .sub-tab svg { width: 14px; height: 14px; }
+  .sub-tab.active {
+    background: var(--surface); color: var(--text); font-weight: 600;
+    box-shadow: var(--shadow-sm);
+  }
+  .sub-tab:hover:not(.active) { color: var(--text); }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 768px) {
+    nav { flex-direction: column; gap: 12px; height: auto; padding: 14px 16px; }
+    .container { padding: 16px; }
+    .nav-right { width: 100%; justify-content: center; }
+    .nav-tabs { overflow-x: auto; }
+    .search-input { min-width: 140px; flex: 1; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    .config-field { flex-direction: column; gap: 6px; }
+    .config-field label { min-width: unset; }
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- SVG icon definitions (hidden) -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <symbol id="ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+      <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+    </symbol>
+    <symbol id="ico-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+    </symbol>
+    <symbol id="ico-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </symbol>
+    <symbol id="ico-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+    </symbol>
+    <symbol id="ico-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+      <line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>
+    </symbol>
+    <symbol id="ico-wallet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+      <path d="M18 12a2 2 0 0 0 0 4h4v-4z"/>
+    </symbol>
+    <symbol id="ico-trending-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+    </symbol>
+    <symbol id="ico-trending-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/>
+    </symbol>
+    <symbol id="ico-bar-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>
+    </symbol>
+    <symbol id="ico-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </symbol>
+    <symbol id="ico-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </symbol>
+    <symbol id="ico-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+    </symbol>
+    <symbol id="ico-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+    </symbol>
+    <symbol id="ico-sigma" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 6H6l6 6-6 6h12"/>
+    </symbol>
+    <symbol id="ico-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </symbol>
+    <symbol id="ico-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/>
+      <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+    </symbol>
+    <symbol id="ico-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+    </symbol>
+    <symbol id="ico-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/>
+      <line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>
+    </symbol>
+    <symbol id="ico-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>
+    </symbol>
+    <symbol id="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+    </symbol>
+    <symbol id="ico-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+    </symbol>
+    <symbol id="ico-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+      <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+    </symbol>
+    <symbol id="ico-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ═══ NAV ═══ -->
+<nav>
+  <div class="logo">
+    <div class="logo-icon"><img src="icons/logo.png" alt="PK Finance"></div>
+    PK Finance <span>Dashboard</span>
+  </div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="switchSection('funds')">
+      <svg><use href="#ico-wallet"/></svg> Mutual Funds
+    </button>
+    <button class="nav-tab" onclick="switchSection('stocks')">
+      <svg><use href="#ico-bar-chart"/></svg> Stocks
+    </button>
+    <button class="nav-tab" onclick="switchSection('indices')">
+      <svg><use href="#ico-activity"/></svg> Indices
+    </button>
+    <button class="nav-tab" onclick="switchSection('config')">
+      <svg><use href="#ico-settings"/></svg> Config
+    </button>
+  </div>
+  <div class="nav-right">
+    <div class="status-pill">
+      <div class="status-dot" id="mufapDot"></div> MUFAP
+    </div>
+    <div class="status-pill">
+      <div class="status-dot" id="psxDot"></div> PSX
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <!-- Message -->
+  <div class="msg-bar" id="msg"></div>
+
+  <!-- ═══════ FUNDS SECTION ═══════ -->
+  <div class="section active" id="sec-funds">
+    <div class="section-header">
+      <div class="icon-wrap funds"><svg><use href="#ico-wallet"/></svg></div>
+      <div>
+        <h2>Mutual Funds</h2>
+        <p>Pakistan mutual fund NAV data from MUFAP</p>
+      </div>
+    </div>
+
+    <div class="stat-grid" id="fundStats">
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-hash"/></svg> Total Funds</div>
+        <div class="val" id="fTotal">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-grid"/></svg> Categories</div>
+        <div class="val" id="fCats">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-trending-up"/></svg> Avg NAV</div>
+        <div class="val" id="fAvg">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-trending-up"/></svg> Max NAV</div>
+        <div class="val" id="fMax">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-calendar"/></svg> Data Date</div>
+        <div class="val sm" id="fDate">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-clock"/></svg> Last Scrape</div>
+        <div class="val sm" id="fScrape">—</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn primary" onclick="scrapeFunds()" id="btnScrapeFunds">
+        <svg><use href="#ico-refresh"/></svg> Scrape
+      </button>
+      <button class="btn" onclick="loadFunds()">
+        <svg><use href="#ico-download"/></svg> Load
+      </button>
+      <button class="btn" onclick="loadFundCategories()">
+        <svg><use href="#ico-grid"/></svg> Categories
+      </button>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <svg><use href="#ico-search"/></svg>
+        <input class="search-input" id="fundSearch" placeholder="Search fund name..." onkeydown="if(event.key==='Enter')searchFunds()">
+      </div>
+      <button class="btn" onclick="searchFunds()">
+        <svg><use href="#ico-search"/></svg> Search
+      </button>
+      <span class="rec-count" id="fundCount"></span>
+    </div>
+
+    <div class="chips" id="fundChips"></div>
+
+    <div id="fundEmpty" class="empty">
+      <div class="icon"><svg><use href="#ico-database"/></svg></div>
+      <p>Click <strong>Scrape</strong> to fetch live data from MUFAP,<br>then <strong>Load</strong> to view funds.</p>
+    </div>
+
+    <div class="table-wrap" id="fundTableWrap" style="display:none">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortFunds(0)">#</th>
+            <th onclick="sortFunds(1)">Category</th>
+            <th onclick="sortFunds(2)">Fund Name</th>
+            <th onclick="sortFunds(3)">Inception</th>
+            <th onclick="sortFunds(4)" class="right">Offer</th>
+            <th onclick="sortFunds(5)" class="right">Repurchase</th>
+            <th onclick="sortFunds(6)" class="right">NAV</th>
+            <th onclick="sortFunds(7)">Date</th>
+            <th onclick="sortFunds(8)">Trustee</th>
+          </tr>
+        </thead>
+        <tbody id="fundBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════ STOCKS SECTION ═══════ -->
+  <div class="section" id="sec-stocks">
+    <div class="section-header">
+      <div class="icon-wrap stocks"><svg><use href="#ico-bar-chart"/></svg></div>
+      <div>
+        <h2>Stock Market</h2>
+        <p>Pakistan Stock Exchange (PSX) live market data</p>
+      </div>
+    </div>
+
+    <div class="sub-tabs">
+      <button class="sub-tab active" id="stab-all" onclick="switchStockView('all')">
+        <svg><use href="#ico-list"/></svg> All
+      </button>
+      <button class="sub-tab" id="stab-gainers" onclick="switchStockView('gainers')">
+        <svg><use href="#ico-trending-up"/></svg> Gainers
+      </button>
+      <button class="sub-tab" id="stab-losers" onclick="switchStockView('losers')">
+        <svg><use href="#ico-trending-down"/></svg> Losers
+      </button>
+      <button class="sub-tab" id="stab-active" onclick="switchStockView('active')">
+        <svg><use href="#ico-zap"/></svg> Active
+      </button>
+      <button class="sub-tab" id="stab-summary" onclick="switchStockView('summary')">
+        <svg><use href="#ico-sigma"/></svg> Summary
+      </button>
+    </div>
+
+    <div class="stat-grid" id="stockStats">
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-hash"/></svg> Total Stocks</div>
+        <div class="val" id="sTotal">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-trending-up"/></svg> Gainers</div>
+        <div class="val green" id="sGain">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-trending-down"/></svg> Losers</div>
+        <div class="val red" id="sLose">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-activity"/></svg> Unchanged</div>
+        <div class="val" id="sFlat">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-bar-chart"/></svg> Total Volume</div>
+        <div class="val sm" id="sVol">—</div>
+      </div>
+      <div class="stat">
+        <div class="label"><svg><use href="#ico-clock"/></svg> Last Scrape</div>
+        <div class="val sm" id="sScrape">—</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn primary" onclick="scrapeStocks()" id="btnScrapeStocks">
+        <svg><use href="#ico-refresh"/></svg> Scrape
+      </button>
+      <button class="btn" onclick="loadStocks()">
+        <svg><use href="#ico-download"/></svg> Load
+      </button>
+      <div class="spacer"></div>
+      <div class="search-wrap">
+        <svg><use href="#ico-search"/></svg>
+        <input class="search-input" id="stockSearch" placeholder="Search symbol (e.g. HBL)..." onkeydown="if(event.key==='Enter')searchStocks()">
+      </div>
+      <button class="btn" onclick="searchStocks()">
+        <svg><use href="#ico-search"/></svg> Search
+      </button>
+      <span class="rec-count" id="stockCount"></span>
+    </div>
+
+    <div id="stockEmpty" class="empty">
+      <div class="icon"><svg><use href="#ico-database"/></svg></div>
+      <p>Click <strong>Scrape</strong> to fetch PSX market data,<br>then <strong>Load</strong> to view stocks.</p>
+    </div>
+
+    <div class="table-wrap" id="stockTableWrap" style="display:none">
+      <table>
+        <thead>
+          <tr id="stockHead">
+            <th onclick="sortStocks(0)">#</th>
+            <th onclick="sortStocks(1)">Symbol</th>
+            <th onclick="sortStocks(2)" class="right">LDCP</th>
+            <th onclick="sortStocks(3)" class="right">Open</th>
+            <th onclick="sortStocks(4)" class="right">High</th>
+            <th onclick="sortStocks(5)" class="right">Low</th>
+            <th onclick="sortStocks(6)" class="right">Current</th>
+            <th onclick="sortStocks(7)" class="right">Change</th>
+            <th onclick="sortStocks(8)" class="right">Chg%</th>
+            <th onclick="sortStocks(9)" class="right">Volume</th>
+          </tr>
+        </thead>
+        <tbody id="stockBody"></tbody>
+      </table>
+    </div>
+
+    <div id="summaryView" style="display:none"></div>
+  </div>
+
+  <!-- ═══════ INDICES SECTION ═══════ -->
+  <div class="section" id="sec-indices">
+    <div class="section-header">
+      <div class="icon-wrap indices"><svg><use href="#ico-activity"/></svg></div>
+      <div>
+        <h2>Market Indices</h2>
+        <p>PSX index values and daily changes</p>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="btn primary" onclick="loadIndices()">
+        <svg><use href="#ico-download"/></svg> Load Indices
+      </button>
+      <button class="btn" onclick="scrapeIndices()">
+        <svg><use href="#ico-refresh"/></svg> Scrape
+      </button>
+    </div>
+    <div id="idxEmpty" class="empty" style="margin-top:24px">
+      <div class="icon"><svg><use href="#ico-layers"/></svg></div>
+      <p>Click <strong>Load Indices</strong> to view PSX index data.</p>
+    </div>
+    <div class="idx-grid" id="idxGrid" style="margin-top:16px"></div>
+  </div>
+
+  <!-- ═══════ CONFIG SECTION ═══════ -->
+  <div class="section" id="sec-config">
+    <div class="section-header">
+      <div class="icon-wrap config"><svg><use href="#ico-settings"/></svg></div>
+      <div>
+        <h2>Configuration</h2>
+        <p>API endpoint settings and reference</p>
+      </div>
+    </div>
+
+    <div class="config-section">
+      <div class="config-card">
+        <h3><svg><use href="#ico-link"/></svg> API Endpoints</h3>
+        <div class="config-field">
+          <label>MUFAP</label>
+          <input id="cfgMufap" value="https://api.fintraxa.com/api/mufap" onchange="checkAll()">
+        </div>
+        <div class="config-field">
+          <label>PSX</label>
+          <input id="cfgPsx" value="https://api.fintraxa.com/api/psx" onchange="checkAll()">
+        </div>
+      </div>
+
+      <div class="config-card" style="animation-delay:.1s">
+        <h3><svg><use href="#ico-globe"/></svg> Endpoints Reference</h3>
+        <div class="table-wrap endpoints-table">
+          <table>
+            <thead><tr><th>Service</th><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td class="dim">Health</td><td><span class="method get">GET</span></td><td class="mono">/api/health</td><td>Overall service health</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/</td><td>Service info &amp; status</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/health</td><td>MUFAP health check</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/funds</td><td>All funds (filter, sort, paginate)</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/funds/search?q=</td><td>Search by name / category / trustee</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/funds/categories</td><td>Categories with counts</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/funds/category/{name}</td><td>Funds in a category</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/funds/stats</td><td>Aggregate statistics</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method get">GET</span></td><td class="mono">/api/mufap/funds/top-nav</td><td>Top N by NAV</td></tr>
+              <tr><td class="dim">MUFAP</td><td><span class="method post">POST</span></td><td class="mono">/api/mufap/scrape/sync</td><td>Trigger scrape (blocking)</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/</td><td>Service info &amp; status</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/health</td><td>PSX health check</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/stocks</td><td>All stocks (filter, sort, paginate)</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/stocks/search?symbol=</td><td>Search by symbol</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/stocks/{symbol}</td><td>Single stock detail</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/stocks/gainers</td><td>Top gainers</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/stocks/losers</td><td>Top losers</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/stocks/active</td><td>Most active by volume</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/stocks/summary</td><td>Market summary stats</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method get">GET</span></td><td class="mono">/api/psx/indices</td><td>PSX indices</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method post">POST</span></td><td class="mono">/api/psx/scrape/indices</td><td>Scrape indices only</td></tr>
+              <tr><td class="dim">PSX</td><td><span class="method post">POST</span></td><td class="mono">/api/psx/scrape/sync</td><td>Trigger scrape (blocking)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── API Helpers ──
+function mufapApi() { return document.getElementById('cfgMufap').value.replace(/\/+$/,''); }
+function psxApi() { return document.getElementById('cfgPsx').value.replace(/\/+$/,''); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function n(v, d=2) { return v != null ? Number(v).toLocaleString('en-PK', {minimumFractionDigits:d, maximumFractionDigits:d}) : '—'; }
+function nInt(v) { return v != null ? Number(v).toLocaleString() : '—'; }
+function chgCls(v) { return v > 0 ? 'green' : v < 0 ? 'red' : 'dim'; }
+function fmtChg(v) { if (v == null) return '—'; return (v > 0 ? '+' : '') + Number(v).toFixed(2); }
+function ts(d) { return d ? new Date(d).toLocaleString() : '—'; }
+
+// ── State ──
+let fundData = [], stockData = [];
+let fSortCol = -1, fSortAsc = true, sSortCol = -1, sSortAsc = true;
+let activeFundCat = null, activeStockView = 'all';
+
+// ── Messages ──
+function showMsg(text, type) {
+  const el = document.getElementById('msg');
+  const icon = type === 'error'
+    ? '<svg style="width:16px;height:16px;flex-shrink:0"><use href="#ico-alert"/></svg>'
+    : type === 'success'
+    ? '<svg style="width:16px;height:16px;flex-shrink:0"><use href="#ico-check"/></svg>'
+    : '';
+  el.className = 'msg-bar show' + (type === 'error' ? ' error' : type === 'success' ? ' success' : '');
+  el.innerHTML = type === 'loading' ? '<div class="spinner"></div>' + text : icon + text;
+}
+function hideMsg() { const el = document.getElementById('msg'); el.className = 'msg-bar'; el.innerHTML = ''; }
+
+// ── Section Switch ──
+function switchSection(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById('sec-' + name).classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => {
+    if (t.textContent.toLowerCase().includes(name)) t.classList.add('active');
+  });
+}
+
+// ── Health Check ──
+async function checkAll() {
+  for (const [api, dotId] of [[mufapApi(), 'mufapDot'], [psxApi(), 'psxDot']]) {
+    try {
+      const r = await fetch(api + '/health', { signal: AbortSignal.timeout(5000) });
+      if (r.ok) { const d = await r.json(); document.getElementById(dotId).className = 'status-dot' + (d.ready ? ' online' : ''); }
+      else document.getElementById(dotId).className = 'status-dot';
+    } catch { document.getElementById(dotId).className = 'status-dot'; }
+  }
+}
+
+// ═══════════════════════════════════════
+//  MUTUAL FUNDS
+// ═══════════════════════════════════════
+async function loadFundStats() {
+  try {
+    const [st, root] = await Promise.all([
+      fetch(mufapApi() + '/funds/stats').then(r => r.json()),
+      fetch(mufapApi() + '/').then(r => r.json()),
+    ]);
+    document.getElementById('fTotal').textContent = st.total_funds || 0;
+    document.getElementById('fCats').textContent = st.total_categories || 0;
+    document.getElementById('fAvg').textContent = st.nav ? n(st.nav.mean) : '—';
+    document.getElementById('fMax').textContent = st.nav ? n(st.nav.max) : '—';
+    document.getElementById('fDate').textContent = st.data_date || '—';
+    document.getElementById('fScrape').textContent = ts(root.last_scrape);
+  } catch {}
+}
+
+async function scrapeFunds() {
+  const btn = document.getElementById('btnScrapeFunds'); btn.disabled = true;
+  showMsg('Scraping MUFAP data…', 'loading');
+  try {
+    const r = await fetch(mufapApi() + '/scrape/sync', { method: 'POST' });
+    const d = await r.json();
+    if (d.count > 0) { showMsg('Scraped ' + d.count + ' funds successfully', 'success'); loadFundStats(); }
+    else showMsg('Scrape returned 0 records', 'error');
+    setTimeout(hideMsg, 3000);
+  } catch (e) { showMsg('Scrape failed: ' + e.message, 'error'); }
+  finally { btn.disabled = false; }
+}
+
+async function loadFunds(category) {
+  showMsg('Loading funds…', 'loading');
+  try {
+    let url = mufapApi() + '/funds?limit=5000';
+    if (category) url += '&category=' + encodeURIComponent(category);
+    const r = await fetch(url); const d = await r.json();
+    fundData = d.data || [];
+    renderFunds(fundData);
+    document.getElementById('fundCount').textContent = fundData.length + ' records';
+    hideMsg();
+  } catch (e) { showMsg('Load failed: ' + e.message, 'error'); }
+}
+
+async function searchFunds() {
+  const q = document.getElementById('fundSearch').value.trim();
+  if (!q) { loadFunds(); return; }
+  showMsg('Searching…', 'loading');
+  try {
+    const r = await fetch(mufapApi() + '/funds/search?q=' + encodeURIComponent(q));
+    const d = await r.json();
+    fundData = d.data || [];
+    renderFunds(fundData);
+    document.getElementById('fundCount').textContent = fundData.length + ' results';
+    hideMsg(); if (!fundData.length) showMsg('No funds match "' + esc(q) + '"', 'error');
+  } catch (e) { showMsg('Search failed: ' + e.message, 'error'); }
+}
+
+async function loadFundCategories() {
+  try {
+    const r = await fetch(mufapApi() + '/funds/categories'); const d = await r.json();
+    const cats = d.categories || [];
+    const el = document.getElementById('fundChips');
+    el.innerHTML = '<button class="chip' + (!activeFundCat ? ' active' : '') + '" onclick="activeFundCat=null;loadFunds();loadFundCategories()">All</button>';
+    cats.forEach(c => {
+      el.innerHTML += '<button class="chip' + (activeFundCat === c.category ? ' active' : '') +
+        '" onclick="activeFundCat=\'' + esc(c.category).replace(/'/g,"\\'") + '\';loadFunds(activeFundCat);loadFundCategories()">' +
+        esc(c.category) + ' <span class="dim">(' + c.count + ')</span></button>';
+    });
+  } catch {}
+}
+
+function renderFunds(data) {
+  const wrap = document.getElementById('fundTableWrap');
+  const empty = document.getElementById('fundEmpty');
+  if (!data.length) { wrap.style.display = 'none'; empty.style.display = 'block'; return; }
+  wrap.style.display = 'block'; empty.style.display = 'none';
+  document.getElementById('fundBody').innerHTML = data.map((r, i) => `<tr>
+    <td class="dim">${i+1}</td>
+    <td class="dim">${esc(r.fund_category||'—')}</td>
+    <td class="bold">${esc(r.fund_name||'—')}</td>
+    <td class="dim">${esc(r.inception_date||'—')}</td>
+    <td class="mono right">${n(r.offer_price,4)}</td>
+    <td class="mono right">${n(r.repurchase_price,4)}</td>
+    <td class="mono right bold">${n(r.nav,4)}</td>
+    <td class="dim">${esc(r.date_updated||'—')}</td>
+    <td class="dim">${esc(r.trustee||'—')}</td>
+  </tr>`).join('');
+}
+
+function sortFunds(col) {
+  if (fSortCol === col) fSortAsc = !fSortAsc; else { fSortCol = col; fSortAsc = true; }
+  const keys = ['_','fund_category','fund_name','inception_date','offer_price','repurchase_price','nav','date_updated','trustee'];
+  const k = keys[col];
+  fundData.sort((a,b) => {
+    let va = a[k], vb = b[k];
+    if (['offer_price','repurchase_price','nav'].includes(k)) { va = Number(va)||0; vb = Number(vb)||0; }
+    else { va = (va||'').toString().toLowerCase(); vb = (vb||'').toString().toLowerCase(); }
+    return fSortAsc ? (va<vb?-1:va>vb?1:0) : (va>vb?-1:va<vb?1:0);
+  });
+  renderFunds(fundData);
+}
+
+// ═══════════════════════════════════════
+//  STOCKS
+// ═══════════════════════════════════════
+function switchStockView(view) {
+  activeStockView = view;
+  document.querySelectorAll('[id^=stab-]').forEach(b => b.classList.remove('active'));
+  document.getElementById('stab-' + view).classList.add('active');
+  if (view === 'summary') { loadSummary(); return; }
+  document.getElementById('summaryView').style.display = 'none';
+  document.getElementById('stockTableWrap').style.display = stockData.length ? 'block' : 'none';
+  document.getElementById('stockEmpty').style.display = stockData.length ? 'none' : 'block';
+
+  if (view === 'all') { renderStocks(stockData); return; }
+
+  const ep = view === 'gainers' ? '/stocks/gainers?limit=50' : view === 'losers' ? '/stocks/losers?limit=50' : '/stocks/active?limit=50';
+  fetch(psxApi() + ep).then(r => r.json()).then(d => { renderStocks(d.data || []); document.getElementById('stockCount').textContent = (d.data||[]).length + ' stocks'; }).catch(() => {});
+}
+
+async function loadStockStats() {
+  try {
+    const r = await fetch(psxApi() + '/stocks/summary'); const d = await r.json();
+    document.getElementById('sTotal').textContent = d.total_stocks || 0;
+    document.getElementById('sGain').textContent = d.gainers || 0;
+    document.getElementById('sLose').textContent = d.losers || 0;
+    document.getElementById('sFlat').textContent = d.unchanged || 0;
+    document.getElementById('sVol').textContent = nInt(d.total_volume);
+    document.getElementById('sScrape').textContent = ts(d.last_scrape);
+  } catch {}
+}
+
+async function scrapeStocks() {
+  const btn = document.getElementById('btnScrapeStocks'); btn.disabled = true;
+  showMsg('Scraping PSX data…', 'loading');
+  try {
+    const r = await fetch(psxApi() + '/scrape/sync', { method: 'POST' });
+    const d = await r.json();
+    if (d.stocks > 0) { showMsg('Scraped ' + d.stocks + ' stocks successfully', 'success'); loadStockStats(); }
+    else showMsg('Scrape returned 0 stocks', 'error');
+    setTimeout(hideMsg, 3000);
+  } catch (e) { showMsg('Scrape failed: ' + e.message, 'error'); }
+  finally { btn.disabled = false; }
+}
+
+async function loadStocks() {
+  showMsg('Loading stocks…', 'loading');
+  try {
+    const r = await fetch(psxApi() + '/stocks?limit=5000&sort_by=volume&ascending=false');
+    const d = await r.json();
+    stockData = d.data || [];
+    renderStocks(stockData);
+    document.getElementById('stockCount').textContent = stockData.length + ' stocks';
+    loadStockStats();
+    hideMsg();
+  } catch (e) { showMsg('Load failed: ' + e.message, 'error'); }
+}
+
+async function searchStocks() {
+  const q = document.getElementById('stockSearch').value.trim();
+  if (!q) { loadStocks(); return; }
+  showMsg('Searching…', 'loading');
+  try {
+    const r = await fetch(psxApi() + '/stocks/search?symbol=' + encodeURIComponent(q));
+    const d = await r.json();
+    stockData = d.data || [];
+    renderStocks(stockData);
+    document.getElementById('stockCount').textContent = stockData.length + ' results';
+    hideMsg(); if (!stockData.length) showMsg('No match for "' + esc(q) + '"', 'error');
+  } catch (e) { showMsg('Search failed: ' + e.message, 'error'); }
+}
+
+function renderStocks(data) {
+  const wrap = document.getElementById('stockTableWrap');
+  const empty = document.getElementById('stockEmpty');
+  const sum = document.getElementById('summaryView');
+  sum.style.display = 'none';
+  if (!data.length) { wrap.style.display = 'none'; empty.style.display = 'block'; return; }
+  wrap.style.display = 'block'; empty.style.display = 'none';
+  document.getElementById('stockBody').innerHTML = data.map((r, i) => {
+    const cc = chgCls(r.change);
+    return `<tr>
+      <td class="dim">${i+1}</td>
+      <td class="bold">${esc(r.symbol||'')}</td>
+      <td class="mono right">${n(r.ldcp)}</td>
+      <td class="mono right">${n(r.open)}</td>
+      <td class="mono right">${n(r.high)}</td>
+      <td class="mono right">${n(r.low)}</td>
+      <td class="mono right bold">${n(r.current)}</td>
+      <td class="mono right ${cc}">${fmtChg(r.change)}</td>
+      <td class="mono right ${cc}">${r.change_pct!=null?r.change_pct.toFixed(2)+'%':'—'}</td>
+      <td class="mono right">${nInt(r.volume)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function sortStocks(col) {
+  if (sSortCol === col) sSortAsc = !sSortAsc; else { sSortCol = col; sSortAsc = true; }
+  const keys = ['_','symbol','ldcp','open','high','low','current','change','change_pct','volume'];
+  const k = keys[col];
+  stockData.sort((a,b) => {
+    let va = a[k], vb = b[k];
+    if (k === 'symbol') { va = (va||'').toLowerCase(); vb = (vb||'').toLowerCase(); }
+    else { va = Number(va)||0; vb = Number(vb)||0; }
+    return sSortAsc ? (va<vb?-1:va>vb?1:0) : (va>vb?-1:va<vb?1:0);
+  });
+  renderStocks(stockData);
+}
+
+async function loadSummary() {
+  document.getElementById('stockTableWrap').style.display = 'none';
+  document.getElementById('stockEmpty').style.display = 'none';
+  const sv = document.getElementById('summaryView');
+  sv.style.display = 'block';
+  try {
+    const r = await fetch(psxApi() + '/stocks/summary'); const d = await r.json();
+    sv.innerHTML = `<div class="stat-grid">
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-hash"/></svg> Total Stocks</div><div class="val">${d.total_stocks||0}</div></div>
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-trending-up"/></svg> Gainers</div><div class="val green">${d.gainers||0}</div></div>
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-trending-down"/></svg> Losers</div><div class="val red">${d.losers||0}</div></div>
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-activity"/></svg> Unchanged</div><div class="val">${d.unchanged||0}</div></div>
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-bar-chart"/></svg> Total Volume</div><div class="val sm">${nInt(d.total_volume)}</div></div>
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-activity"/></svg> Avg Change %</div><div class="val sm ${chgCls(d.avg_change_pct)}">${d.avg_change_pct!=null?d.avg_change_pct.toFixed(2)+'%':'—'}</div></div>
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-calendar"/></svg> Market Date</div><div class="val sm">${d.market_date||'—'}</div></div>
+      <div class="stat"><div class="label"><svg style="width:13px;height:13px"><use href="#ico-clock"/></svg> Last Scrape</div><div class="val sm">${ts(d.last_scrape)}</div></div>
+    </div>`;
+  } catch (e) { sv.innerHTML = '<div class="empty"><div class="icon"><svg><use href="#ico-alert"/></svg></div><p>Failed to load summary</p></div>'; }
+}
+
+// ═══════════════════════════════════════
+//  INDICES
+// ═══════════════════════════════════════
+async function loadIndices() {
+  showMsg('Loading indices…', 'loading');
+  try {
+    const r = await fetch(psxApi() + '/indices'); const d = await r.json();
+    const items = d.data || [];
+    const grid = document.getElementById('idxGrid');
+    const empty = document.getElementById('idxEmpty');
+    if (!items.length) { empty.style.display = 'block'; grid.innerHTML = ''; hideMsg(); showMsg('No index data available. Try scraping first.', 'error'); return; }
+    empty.style.display = 'none';
+    grid.innerHTML = items.map((item, i) => {
+      const cls = chgCls(item.change);
+      const arrowIcon = (item.change||0) >= 0 ? '#ico-trending-up' : '#ico-trending-down';
+      return `<div class="idx-card" style="animation-delay:${i*0.05}s">
+        <div class="name"><svg><use href="#ico-activity"/></svg> ${esc(item.index_name)}</div>
+        <div class="val">${item.value!=null?nInt(item.value):'—'}</div>
+        <div class="chg ${cls}"><svg><use href="${arrowIcon}"/></svg> ${fmtChg(item.change)} (${item.change_pct!=null?item.change_pct.toFixed(2)+'%':'—'})</div>
+      </div>`;
+    }).join('');
+    hideMsg();
+  } catch (e) { showMsg('Failed: ' + e.message, 'error'); }
+}
+
+async function scrapeIndices() {
+  showMsg('Scraping indices…', 'loading');
+  try {
+    await fetch(psxApi() + '/scrape/indices', { method: 'POST' });
+    showMsg('Indices scraped successfully', 'success'); setTimeout(hideMsg, 2000);
+    loadIndices();
+  } catch (e) { showMsg('Failed: ' + e.message, 'error'); }
+}
+
+// ── Init ──
+checkAll(); loadFundStats(); loadStockStats();
+setInterval(checkAll, 30000);
+
+// ── Service Worker Registration ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.log('SW registration failed:', err));
+  });
+}
+</script>
+</body>
+</html>
