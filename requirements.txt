@@ -1,0 +1,12 @@
+# Pinned exactly. An unpinned range meant two builds of the same commit
+# resolved to different software: `pandas>=2.2` was already pulling pandas 3.x.
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn[standard]==0.38.0
+httpx==0.28.1
+beautifulsoup4==4.15.0
+lxml==6.1.3
+orjson==3.12.0
+# MUFAP only: negotiates a standard browser TLS profile, which its Cloudflare
+# bot management requires even though robots.txt permits the request.
+curl_cffi==0.13.1

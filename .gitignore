@@ -1,33 +1,29 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
+*.egg-info/
 .venv/
 venv/
-*.egg-info/
-dist/
-build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# Environment and secrets
+# Secrets — never commit a real .env
 .env
 .env.local
-*.env
+.env.*.local
 
-# Output and generated files
-output/
-*.xlsx
+# Node / frontend build
+node_modules/
+frontend/dist/
+.vite/
 
-# IDE
+# Vercel
+.vercel/
+
+# Editors / OS
 .idea/
 .vscode/
 *.swp
-*.swo
-
-# Node
-node_modules/
-package-lock.json
-
-# OS
 .DS_Store
 Thumbs.db
