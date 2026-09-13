@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { FiArrowDownRight, FiArrowUpRight, FiTrendingUp } from 'react-icons/fi'
 import { api } from '../api'
 import Freshness from './Freshness'
 import { Loading, Empty, Failed } from './States'
@@ -31,12 +32,18 @@ export default function IndicesView({ nonce }) {
       <Freshness freshness={state.body.freshness} />
       <div className="grid">
         {rows.map((idx) => {
-          // The API returns index_name; `name` is an alias it also sets. The
-          // old dashboard read only `name`/`index` and rendered a dash for all.
           const label = idx.index_name || idx.name
           const dir = idx.change > 0 ? 'up' : idx.change < 0 ? 'down' : 'flat'
+          const TrendIcon = dir === 'up' ? FiArrowUpRight : dir === 'down' ? FiArrowDownRight : FiTrendingUp
+
           return (
             <article className={`card card--${dir}`} key={label}>
+              <div className="card-header-row">
+                <span className="card-badge">Index</span>
+                <span className={`card-trend ${dir}`} aria-label={dir}>
+                  <TrendIcon />
+                </span>
+              </div>
               <h3 className="card-title">{label}</h3>
               <p className="card-value">{num(idx.current ?? idx.value)}</p>
               <p className={`card-change change--${dir}`}>

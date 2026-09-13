@@ -15,6 +15,6 @@
     { "source": "/internal/(.*)", "destination": "/api/index" }
   ],
   "crons": [
-    { "path": "/api/cron/refresh", "schedule": "*/10 * * * *" }
+    { "path": "/api/cron/refresh", "schedule": "0 * * * *" }
   ]
 }

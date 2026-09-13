@@ -4,9 +4,9 @@
 #   docker compose down
 
 services:
-  pk-finance-unified:
+  psx-mufap-micro-service:
     build: .
-    container_name: pk-finance-unified
+    container_name: psx-mufap-micro-service
     ports:
       - "8000:8000"
     environment:
