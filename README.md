@@ -112,9 +112,12 @@ which is always either good data or explicitly marked unavailable.
 
 ## Quick start
 
-> **Rename the project folder first if it contains spaces or `&`.**
-> `npm run build` fails on Windows inside a path like `PSX & MUFAP Microservice`
-> — the `&` truncates the resolved path. Use `psx-mufap-microservice`.
+> **A `&` in the project path used to break `npm run dev` on Windows.** npm runs
+> scripts through `cmd.exe`, which treats `&` as a command separator, so a path
+> like `PSX & MUFAP Microservice` split and npm looked for vite in the wrong
+> place. The npm scripts now call vite through `node` with a relative path, so
+> they work whatever the folder is called. Renaming to `psx-mufap-microservice`
+> is still worth doing — other tools shell out the same way.
 
 ### 1. Backend
 
@@ -661,10 +664,12 @@ A required column disappeared from the upstream table. This is intentional —
 the parser raises rather than guessing positions. Update the column spec in
 `app/psx/parsers.py` or `app/mufap/parsers.py`.
 
-**`npm run build` fails with `MODULE_NOT_FOUND`**
-The project path contains a space or `&`. Rename the folder to
-`psx-mufap-microservice`. As a stopgap:
-`node ./node_modules/vite/bin/vite.js build`.
+**`npm run dev` fails with `'MUFAP' is not recognized` / `MODULE_NOT_FOUND`**
+An older `package.json` called `vite` directly, and npm runs scripts through
+`cmd.exe`, which splits the path at the `&` in the folder name. The scripts now
+invoke `node ./node_modules/vite/bin/vite.js`, which has no absolute path for
+cmd to mis-split. If you still hit it, run `npm install` again so the scripts
+are picked up, or rename the folder to `psx-mufap-microservice`.
 
 **Frontend shows no data locally**
 The backend must be running on the port Vite proxies to (8000 by default).
