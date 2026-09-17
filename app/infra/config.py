@@ -139,6 +139,10 @@ class Settings:
         # "httpx" forces the plain client. PSX never uses this path.
         self.mufap_http_client: str = os.getenv("MUFAP_HTTP_CLIENT", "curl_cffi").strip().lower()
         self.mufap_impersonate: str = os.getenv("MUFAP_IMPERSONATE", "chrome").strip()
+        # Backoff between impersonation profiles, in seconds. Deliberately an
+        # order of magnitude larger than the generic HTTP backoff: a Cloudflare
+        # challenge is the one failure that retrying quickly makes worse.
+        self.mufap_retry_backoff_s: float = _env_float("MUFAP_RETRY_BACKOFF_SECONDS", 12.0)
 
         # ── Upstream endpoints ──────────────────────────────────────────
         self.psx_base: str = os.getenv("PSX_BASE_URL", "https://dps.psx.com.pk").rstrip("/")

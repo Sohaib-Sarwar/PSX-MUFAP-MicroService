@@ -275,11 +275,70 @@ from a branch". See step 3.
 yet".** The `service-data` branch has no snapshots. Run either scrape workflow
 manually.
 
-**MUFAP runs report `degraded` with "blocked by upstream bot management".**
-Cloudflare declined the TLS fingerprint. The site keeps serving the previous good
-snapshot, labelled. If it persists, check that `curl_cffi` installed correctly in
-the job log — without it the client falls back to plain httpx, which MUFAP
-reliably answers with 403.
+**MUFAP runs are refused by Cloudflare — the known hard case.**
+
+This one is real and was hit on the very first scheduled run. The same
+`curl_cffi` request that succeeds from a Pakistani residential connection was
+refused three times from a GitHub-hosted runner. Cloudflare scores TLS
+fingerprint *and* source-IP reputation, and GitHub's Azure ranges start from a
+much worse prior than any home connection.
+
+What the client now does about it (`app/infra/browser_http.py`):
+
+- **One session per run**, so the `__cf_bm` cookie a successful request earns is
+  still there for the next one. Previously every request opened a new connection
+  and threw that away.
+- **A warm-up request to the site root** before any data page, which is how a
+  visitor actually arrives — and how the clearance cookie is issued.
+- **A `Referer`** consistent with having done so.
+- **Four TLS profiles tried in turn** — Chrome, Safari and Firefox builds — with
+  escalating, jittered backoff measured in tens of seconds. A challenge is the
+  one failure that retrying quickly makes strictly worse.
+- **Diagnostics worth reading**: the run logs the status, body size, `cf-ray`
+  and `cf-mitigated` for each refusal, so the next failure says which layer
+  refused rather than just that something did.
+
+Tune it without editing code:
+
+```
+MUFAP_IMPERSONATE_CHAIN=safari184,chrome146,firefox144   # try these, in order
+MUFAP_RETRY_BACKOFF_SECONDS=20                           # start of the backoff ramp
+```
+
+**If it is still refused**, the source address is the part that cannot be
+argued with from inside a GitHub runner. In rough order of effort:
+
+1. **Seed the branch once from a machine that is not refused.** Scrape locally
+   and publish the snapshot by hand:
+
+   ```bash
+   python scripts/scrape.py --domain mufap
+   DATA_BRANCH=service-data .github/scripts/publish-data.sh 'mufap.'
+   ```
+
+   This is worth doing regardless. With *any* previous snapshot present, a
+   blocked run becomes `degraded` (exit 0, a warning, last-good data still
+   served) instead of `failed` (exit 1, a red run and an email). The cold-start
+   case is the only one that fails outright, and seeding removes it.
+
+2. **Run the MUFAP job on a self-hosted runner** with a residential address —
+   a spare machine or a small VPS. Change one line in `scrape-mufap.yml`:
+
+   ```yaml
+   # in .github/workflows/_scrape.yml, or override per-domain
+   runs-on: self-hosted
+   ```
+
+   PSX is unaffected and stays on GitHub's runners.
+
+3. **Ask MUFAP.** Their `robots.txt` says `Allow: /` with
+   `Content-Signal: use=reference`, so the access is permitted and the block is a
+   heuristic misfire. A note to their IT with a `cf-ray` from the job log is the
+   clean fix, and the logs now carry one.
+
+**A MUFAP run says `curl_cffi_unavailable`.** The package did not install; the
+client fell back to plain httpx, which MUFAP answers with 403 every time. Check
+the install step in the job log.
 
 **Assets 404 after a rename.** The base path is derived from the repository name
 at build time. Re-run `pages.yml` after renaming the repository.

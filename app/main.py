@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from . import system
 from .infra.config import get_settings
 from .infra.errors import install_error_handlers
+from .infra.browser_http import close_browser_client
 from .infra.http import close_client
 from .infra.logging_setup import configure_logging
 from .infra.security import RateLimitMiddleware, RequestContextMiddleware
@@ -108,6 +109,7 @@ def create_app(domains: Iterable[str] = ("psx", "mufap"), *,
         if scheduler is not None:
             await scheduler.stop()
         await close_client()
+        close_browser_client()
         await reset_store()
         logger.info("service_stopped")
 

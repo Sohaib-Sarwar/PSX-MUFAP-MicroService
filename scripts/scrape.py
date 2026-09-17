@@ -108,6 +108,7 @@ async def run(args: argparse.Namespace) -> int:
     os.environ["LOG_LEVEL"] = args.log_level
 
     from app.infra import limits
+    from app.infra.browser_http import close_browser_client
     from app.infra.config import get_settings, now_pkt
     from app.infra.http import close_client
     from app.infra.logging_setup import configure_logging
@@ -165,6 +166,7 @@ async def run(args: argparse.Namespace) -> int:
             del funds
     finally:
         await close_client()
+        close_browser_client()
         limits.release()
 
     peak = limits.peak_rss_mb()
