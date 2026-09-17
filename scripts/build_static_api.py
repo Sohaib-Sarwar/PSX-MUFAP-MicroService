@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -61,6 +62,17 @@ RETURN_PERIODS = ("ytd", "mtd", "d1", "d15", "d30", "d90",
 
 MOVERS_LIMIT = 50
 TOP_LIMIT = 50
+
+
+def slugify(name: str) -> str:
+    """A URL path segment for a sector or category name.
+
+    Stable across runs, which matters: these become endpoint paths that other
+    projects hardcode. "Shariah Compliant Money Market" -> "shariah-compliant-
+    money-market", and it stays that way as long as MUFAP keeps the name.
+    """
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (name or "other").lower()).strip("-")
+    return cleaned or "other"
 
 
 # ── schedule ──────────────────────────────────────────────────────────────────
@@ -295,8 +307,25 @@ def build_psx(writer: Writer, stocks: Dataset, indices: Dataset) -> list[dict[st
     writer.write("psx/sectors.json", envelope(sectors, stocks, market_status=market_status))
     catalog.append(entry("psx/sectors.json", "Sector breadth",
                          "Per-sector counts, advancers and decliners, traded volume and "
-                         "the average move — derived from the traded instruments.",
+                         "the average move — derived from the traded instruments. Each "
+                         "row carries the `slug` that addresses its own endpoint below.",
                          records=len(sectors), schema="sector"))
+
+    # One file per sector. Filtering by sector is the most common thing a
+    # consumer does with this dataset, and doing it by path means fetching
+    # 6 KB instead of 300 KB to get one sector's instruments.
+    for sector in sectors:
+        members = [r for r in traded if (r.get("sector") or "Unclassified") == sector["sector"]]
+        members.sort(key=lambda r: r.get("volume") or 0, reverse=True)
+        writer.write(f"psx/sectors/{sector['slug']}.json",
+                     envelope(members, stocks, market_status=market_status,
+                              extra={"sector": sector["sector"]}))
+    catalog.append(entry("psx/sectors/{slug}.json", "Instruments in one sector",
+                         "Every traded instrument in a single sector, ordered by volume. "
+                         "`{slug}` comes from the `slug` field in `psx/sectors.json` — "
+                         f"there are {len(sectors)} of them, e.g. "
+                         f"`{sectors[0]['slug'] if sectors else 'commercial-banks'}`.",
+                         records=None, schema="stock"))
 
     index_rows = [shape_index(r) for r in indices.rows]
     writer.write("psx/indices.json", envelope(index_rows, indices))
@@ -330,7 +359,8 @@ def sector_breadth(traded: list[dict[str, Any]]) -> list[dict[str, Any]]:
     buckets: dict[str, dict[str, Any]] = {}
     for row in traded:
         name = row.get("sector") or "Unclassified"
-        bucket = buckets.setdefault(name, {"sector": name, "traded": 0, "gainers": 0,
+        bucket = buckets.setdefault(name, {"sector": name, "slug": slugify(name),
+                                           "traded": 0, "gainers": 0,
                                            "losers": 0, "unchanged": 0, "volume": 0,
                                            "_changes": []})
         bucket["traded"] += 1
@@ -364,11 +394,27 @@ def build_mufap(writer: Writer, funds: Dataset) -> list[dict[str, Any]]:
                          "eleven return periods per fund. Sorted by name.",
                          records=len(shaped), schema="fund"))
 
-    categories = meta.get("categories") or []
+    categories = [{**row, "slug": slugify(row.get("category", ""))}
+                  for row in (meta.get("categories") or [])]
     writer.write("mufap/funds/categories.json", envelope(categories, funds))
     catalog.append(entry("mufap/funds/categories.json", "Categories",
-                         "Every fund category with the number of funds in it.",
+                         "Every fund category with the number of funds in it. Each row "
+                         "carries the `slug` that addresses its own endpoint below.",
                          records=len(categories), schema="category"))
+
+    # One file per category, for the same reason as the PSX sectors: comparing
+    # money market funds should not mean downloading every equity fund too.
+    for category in categories:
+        members = [f for f in shaped if (f.get("category") or "") == category["category"]]
+        members.sort(key=lambda f: (f.get("returns") or {}).get("ytd") is None)
+        writer.write(f"mufap/funds/category/{category['slug']}.json",
+                     envelope(members, funds, extra={"category": category["category"]}))
+    catalog.append(entry("mufap/funds/category/{slug}.json", "Funds in one category",
+                         "Every fund in a single category. `{slug}` comes from the `slug` "
+                         "field in `mufap/funds/categories.json` — there are "
+                         f"{len(categories)} of them, e.g. "
+                         f"`{categories[0]['slug'] if categories else 'money-market'}`.",
+                         records=None, schema="fund"))
 
     amcs: dict[str, int] = {}
     for row in shaped:
@@ -408,6 +454,71 @@ def build_mufap(writer: Writer, funds: Dataset) -> list[dict[str, Any]]:
         "freshness": funds.freshness(),
     })
     return catalog
+
+
+def search_entries(rows: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    """Project one domain's rows down to what a search needs.
+
+    Called while that domain is loaded, so the projection — a few dozen bytes
+    a row — is all that outlives it. Holding both full datasets just to build
+    an index would undo the reason they are processed one at a time.
+    """
+    out: list[dict[str, Any]] = []
+    if kind == "stock":
+        for row in rows:
+            out.append({
+                "type": "stock",
+                "id": row.get("symbol"),
+                "label": row.get("name") or row.get("symbol"),
+                "group": row.get("sector"),
+                "active": bool(row.get("traded")),
+            })
+    else:
+        for row in rows:
+            out.append({
+                "type": "fund",
+                "id": row.get("fund_name"),
+                "label": row.get("fund_name"),
+                "group": row.get("category"),
+                "issuer": row.get("amc"),
+                "active": row.get("nav") is not None,
+            })
+    return out
+
+
+def write_search(writer: Writer, rows: list[dict[str, Any]],
+                 now: datetime) -> dict[str, Any]:
+    """A single index covering both domains.
+
+    A static host cannot answer `?q=`, because the query is not known when the
+    file is written. The honest equivalent is to publish the smallest thing a
+    consumer needs to answer it themselves: identifier, label and grouping for
+    every instrument and every fund, and nothing else — no prices, no returns,
+    no loads. That is about a third of the two full datasets uncompressed and
+    roughly 22 KB on the wire once GitHub gzips it, so a typeahead can hold
+    the whole market in memory and match locally.
+
+    `endpoints` maps each row `type` to the file holding its full record, so a
+    hit leads somewhere without the consumer hardcoding path conventions.
+    """
+    payload = {
+        "count": len(rows),
+        "published_at": now.isoformat(timespec="seconds"),
+        "hint": "Match `id`, `label` and `issuer` case-insensitively, then fetch "
+                "`endpoints[row.type]` and find the record by `id`.",
+        # Stated once rather than on all 1,600 rows, which was 50 KiB of the
+        # same two strings.
+        "endpoints": {"stock": "psx/stocks.json", "fund": "mufap/funds.json"},
+        "data": rows,
+    }
+    writer.write("search.json", payload)
+    return entry("search.json", "Search index for both domains",
+                 "Identifier, label and grouping for every instrument and every fund "
+                 "in one file, with no prices or returns. A static host cannot answer "
+                 "a `?q=` parameter, so this is what it publishes instead: enough to "
+                 "match locally, plus an `endpoints` map to the files holding the full "
+                 "records. 224 KB raw, about 22 KB gzipped.",
+                 records=len(rows), schema="search")
 
 
 # ── catalog ───────────────────────────────────────────────────────────────────
@@ -464,6 +575,7 @@ SCHEMAS: dict[str, dict[str, str]] = {
     },
     "sector": {
         "sector": "Sector name.",
+        "slug": "URL segment for its own endpoint.",
         "traded": "Instruments in the sector that traded.",
         "gainers": "How many closed up.",
         "losers": "How many closed down.",
@@ -471,7 +583,16 @@ SCHEMAS: dict[str, dict[str, str]] = {
         "volume": "Combined shares traded.",
         "avg_change_pct": "Mean percentage move across the sector.",
     },
-    "category": {"category": "Category name.", "count": "Funds in it."},
+    "search": {
+        "type": "`stock` or `fund`.",
+        "id": "PSX ticker, or the fund name exactly as MUFAP publishes it.",
+        "label": "Human-readable name to display.",
+        "group": "Sector for a stock, category for a fund.",
+        "issuer": "Asset management company. Funds only.",
+        "active": "The instrument traded, or the fund published a NAV.",
+    },
+    "category": {"category": "Category name.", "slug": "URL segment for its own endpoint.",
+                 "count": "Funds in it."},
     "amc": {"amc": "Company name.", "count": "Funds it manages."},
     "summary": {
         "listed_instruments": "Instruments listed on PSX.",
@@ -531,17 +652,26 @@ def main() -> int:
     # peak is therefore one dataset, not all of them.
     stocks = Dataset("psx.stocks", "psx", data_dir / "psx.stocks.json", now)
     indices = Dataset("psx.indices", "psx", data_dir / "psx.indices.json", now)
+    # The index board is a view of the same session as the trades, and carries
+    # no timestamp of its own; the last trade tick is what it is "as of".
+    if not indices.data_as_of:
+        indices.data_as_of = stocks.data_as_of
     psx_catalog = build_psx(writer, stocks, indices)
     psx_state = {"stocks": stocks.freshness((stocks.meta or {}).get("market_status")),
                  "indices": indices.freshness()}
     stocks_count, indices_count = stocks.count, indices.count
+    search_rows = search_entries(stocks.rows, "stock")
     del stocks, indices
 
     funds = Dataset("mufap.funds", "mufap", data_dir / "mufap.funds.json", now)
     mufap_catalog = build_mufap(writer, funds)
     mufap_state = {"funds": funds.freshness()}
     funds_count = funds.count
+    search_rows += search_entries(funds.rows, "fund")
     del funds
+
+    search_catalog = write_search(writer, search_rows, now)
+    del search_rows
 
     ready = bool(stocks_count or funds_count)
     writer.write_site("health.json", {"status": "ok",
@@ -573,6 +703,7 @@ def main() -> int:
                   "dashboard's API reference is rendered from this file, so the "
                   "documentation cannot drift from what is actually published.",
                   records=None, schema="catalog"),
+            search_catalog,
             *psx_catalog,
             *mufap_catalog,
         ],
