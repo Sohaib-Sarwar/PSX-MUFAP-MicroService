@@ -1,0 +1,129 @@
+name: Scrape (reusable)
+
+# The scheduled half of the microservice. A run is a whole service lifecycle
+# compressed into a few seconds: start, fetch one upstream, validate, publish a
+# snapshot, exit. The pipeline it drives is the same code the HTTP deployment
+# runs — see scripts/scrape.py.
+#
+# Called by scrape-psx.yml and scrape-mufap.yml, which own the schedules.
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        description: psx or mufap
+        required: true
+        type: string
+      skip_if_current:
+        # Underscores, not hyphens: GitHub's expression parser reads `-` as
+        # subtraction, so `inputs.skip-if-current` is an arithmetic expression
+        # over three undefined names, and evaluates to 0 rather than failing.
+        description: >-
+          Exit without touching the upstream when the published snapshot
+          already covers the current session date.
+        type: boolean
+        default: false
+      force:
+        description: Fetch even when skip-if-current would skip.
+        type: boolean
+        default: false
+    outputs:
+      status:
+        description: ok | degraded | skipped | failed
+        value: ${{ jobs.scrape.outputs.status }}
+      records:
+        description: Rows in the published snapshot.
+        value: ${{ jobs.scrape.outputs.records }}
+
+env:
+  DATA_BRANCH: service-data
+  # Measured peak for these jobs is well under 200 MiB. The ceiling turns a
+  # runaway allocation into a MemoryError naming the limit, instead of an OOM
+  # kill that surfaces as exit 137 with no traceback.
+  #
+  # It is set at 1 GiB rather than tight to the measurement because RLIMIT_AS
+  # caps *address space*, and glibc reserves a 64 MiB arena per thread — up to
+  # eight on a four-core runner. Most of that is never touched, but all of it
+  # counts here, and a ceiling that close to the working set would fail runs
+  # that were never actually short of memory.
+  MAX_MEMORY_MB: '1024'
+  # Two arenas instead of eight. This is the standard fix for glibc's
+  # per-thread arena growth and genuinely lowers the footprint of a job whose
+  # only threads are the one curl_cffi call.
+  MALLOC_ARENA_MAX: '2'
+
+jobs:
+  scrape:
+    name: ${{ inputs.domain }}
+    runs-on: ubuntu-latest
+    # Generous next to a normal run (~30s) and still a hard stop, so a hung
+    # upstream cannot hold a runner for six hours.
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      status: ${{ steps.refresh.outputs.status }}
+      records: ${{ steps.refresh.outputs.records }}
+
+    steps:
+      - name: Check out the service
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore the published snapshots
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          if git fetch --no-tags --depth=1 origin "$DATA_BRANCH"; then
+            git checkout FETCH_HEAD -- data 2>/dev/null \
+              || echo "branch '$DATA_BRANCH' exists but holds no snapshots yet"
+            echo "restored: $(ls -1 data 2>/dev/null | tr '\n' ' ')"
+          else
+            echo "no '$DATA_BRANCH' branch yet — this run starts cold"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-scrape.txt
+
+      - name: Install dependencies
+        # requirements-scrape.txt is the fetch-and-parse subset: no web
+        # framework, no server. Five packages instead of nine, which is both a
+        # faster install and a smaller resident footprint for the job.
+        run: |
+          python -m pip install --upgrade pip --quiet
+          pip install --quiet --no-compile --requirement requirements-scrape.txt
+
+      - name: Refresh ${{ inputs.domain }}
+        id: refresh
+        env:
+          LOG_FORMAT: text
+          # Identifies the client to the upstreams, with somewhere to complain
+          # to. Both sites' robots.txt permit this access; saying who is asking
+          # is the courtesy that goes with it.
+          HTTP_USER_AGENT: >-
+            Mozilla/5.0 (compatible; PK-Finance-Service/6.0;
+            +https://github.com/${{ github.repository }})
+        run: |
+          # Flags are assembled rather than interpolated straight into the
+          # command: an expression that renders empty would otherwise leave
+          # a bare line-continuation in the middle of it.
+          flags=""
+          if [ "${{ inputs.skip_if_current }}" = "true" ]; then flags="$flags --skip-if-current"; fi
+          if [ "${{ inputs.force }}" = "true" ]; then flags="$flags --force"; fi
+
+          python scripts/scrape.py \
+            --domain '${{ inputs.domain }}' \
+            --data-dir data \
+            --max-memory-mb "$MAX_MEMORY_MB" \
+            $flags
+
+      - name: Publish the snapshot
+        if: steps.refresh.outputs.status == 'ok' || steps.refresh.outputs.status == 'degraded'
+        run: |
+          chmod +x .github/scripts/publish-data.sh
+          .github/scripts/publish-data.sh '${{ inputs.domain }}.'

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
     "build": "node ./node_modules/vite/bin/vite.js build",
-    "preview": "node ./node_modules/vite/bin/vite.js preview --port 3000"
+    "preview": "node ./node_modules/vite/bin/vite.js preview --port 3000",
+    "data": "python ../scripts/build_static_api.py --data ../data --out public/api --site-out public"
   },
   "dependencies": {
     "react": "19.0.0",

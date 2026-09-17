@@ -1,0 +1,48 @@
+name: MUFAP — evening NAV
+
+# MUFAP strikes NAV once per business day and publishes it some time during the
+# evening. The hour it lands varies, so the window is swept hourly rather than
+# guessed at:
+#
+#   13:05–19:05 UTC = 18:05–00:05 PKT, Monday to Friday.
+#
+# The sweep stops itself. Each run first reads the published snapshot, and if
+# the NAV validity date already covers the current session it exits without
+# opening a connection — so a normal evening costs one or two fetches, not
+# seven, and MUFAP sees the smallest number of requests that still catches the
+# publication on the hour it happens.
+
+on:
+  schedule:
+    - cron: '5 13-19 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Fetch even if the published snapshot is already current.
+        type: boolean
+        default: false
+
+concurrency:
+  group: market-data
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    uses: ./.github/workflows/_scrape.yml
+    permissions:
+      contents: write
+    with:
+      domain: mufap
+      skip_if_current: true
+      force: ${{ inputs.force == true }}
+
+  publish:
+    needs: scrape
+    if: needs.scrape.outputs.status != 'skipped' && needs.scrape.outputs.status != 'failed'
+    uses: ./.github/workflows/_pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      reason: MUFAP NAV

@@ -1,0 +1,91 @@
+name: CI
+
+# Runs on change, not on a clock. The scheduled workflows fetch from someone
+# else's servers; this one only exercises code that is already here, so it has
+# no business firing on a timer.
+
+on:
+  push:
+    branches: [unified-service, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip --quiet
+          pip install --quiet --requirement requirements-dev.txt
+
+      - name: Unit and regression tests
+        run: python -m pytest
+
+      - name: The scrapers and the publisher still import and parse
+        # A syntax error in either script would otherwise surface for the first
+        # time at 17:10 PKT, in a scheduled run nobody is watching.
+        run: |
+          python scripts/scrape.py --help > /dev/null
+          python scripts/build_static_api.py --help > /dev/null
+          bash -n .github/scripts/publish-data.sh
+
+      - name: The static API builds from an empty snapshot set
+        # The cold-start path — what the very first deployment publishes, and
+        # what a wiped data branch would fall back to.
+        run: |
+          mkdir -p /tmp/empty
+          python scripts/build_static_api.py --data /tmp/empty --out /tmp/site/api --site-out /tmp/site
+          test -f /tmp/site/api/index.json
+          test -f /tmp/site/ready.json
+          python -c "import json,sys; body=json.load(open('/tmp/site/ready.json')); sys.exit(0 if body['status']=='warming_up' else 1)"
+
+  frontend:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        working-directory: frontend
+        env:
+          VITE_BASE: /pkf-base-check/
+        run: npm run build
+
+      - name: The bundle references the base path it was built for
+        # The deploy derives this from the repository name; any value does
+        # here, because what is being checked is that VITE_BASE reaches the
+        # output at all — a silent regression that would 404 every asset.
+        run: |
+          grep -q "/pkf-base-check/assets/" frontend/dist/index.html \
+            || { echo "::error::VITE_BASE did not reach the built index.html - every asset would 404 on Pages."; exit 1; }

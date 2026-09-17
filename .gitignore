@@ -21,6 +21,18 @@ frontend/dist/
 # Vercel
 .vercel/
 
+# Scraped snapshots. These live on the `service-data` branch, which the
+# workflows publish; a local scrape must never dirty the source branch.
+/data/
+
+# Static site build output
+/site/
+# `npm run data` drops a local copy of the published API here so the dev
+# server serves exactly what Pages will serve. Generated, never committed.
+/frontend/public/api/
+/frontend/public/health.json
+/frontend/public/ready.json
+
 # Editors / OS
 .idea/
 .vscode/

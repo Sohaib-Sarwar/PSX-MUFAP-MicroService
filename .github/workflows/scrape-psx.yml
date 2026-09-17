@@ -1,0 +1,48 @@
+name: PSX — daily close
+
+# PSX publishes one closing board per trading day. The previous deployment
+# polled every 30 minutes around the clock; the market trades roughly 31 of the
+# 168 hours in a week, so about four fetches in five returned a board that had
+# not moved. One run after the close collects exactly the same data.
+#
+#   12:10 UTC = 17:10 PKT, Monday to Friday — about half an hour after the
+#   close, and off the top of the hour, where GitHub's scheduler is busiest and
+#   queues runs the longest.
+
+on:
+  schedule:
+    - cron: '10 12 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Fetch even if the published snapshot is already current.
+        type: boolean
+        default: false
+
+# Shared with the MUFAP workflow: both publish to the same data branch, and one
+# writer at a time is what keeps that branch consistent without locking.
+concurrency:
+  group: market-data
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    uses: ./.github/workflows/_scrape.yml
+    permissions:
+      contents: write
+    with:
+      domain: psx
+      skip_if_current: true
+      force: ${{ inputs.force == true }}
+
+  publish:
+    needs: scrape
+    # A skipped scrape changed nothing, so there is nothing to republish.
+    if: needs.scrape.outputs.status != 'skipped' && needs.scrape.outputs.status != 'failed'
+    uses: ./.github/workflows/_pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      reason: PSX close

@@ -1,0 +1,139 @@
+name: Pages (reusable)
+
+# Builds the site GitHub Pages serves: the dashboard, plus the whole read API
+# precomputed as static JSON from whatever snapshots the data branch currently
+# holds.
+#
+# Called after every scrape, and on any push that changes the site itself.
+
+on:
+  workflow_call:
+    inputs:
+      reason:
+        description: What triggered this publication, shown in the run summary.
+        type: string
+        default: manual
+
+env:
+  DATA_BRANCH: service-data
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the service
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch the published snapshots
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          if git fetch --no-tags --depth=1 origin "$DATA_BRANCH"; then
+            git checkout FETCH_HEAD -- data 2>/dev/null || true
+          fi
+          if [ -z "$(ls -A data 2>/dev/null)" ]; then
+            # Not a failure. The dashboard renders its empty state and says so,
+            # which is the honest result before the first scrape has ever run.
+            echo "::warning::No snapshots on '$DATA_BRANCH' yet — publishing an empty API."
+          else
+            ls -lh data
+          fi
+
+      - name: Resolve the public base path
+        id: base
+        # A project site lives under /<repo>/; a user or organisation site lives
+        # at the root. Deriving it means a fork publishes correctly with no edit.
+        #
+        # `github.repository` ("owner/repo") rather than
+        # `github.event.repository.name`: this workflow is called from a
+        # scheduled one, and the event payload a cron delivers is not the same
+        # shape as a push's. `github.repository` is set for every event there is.
+        run: |
+          set -euo pipefail
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          repo='${{ github.repository }}'
+          repo="${repo##*/}"
+          if [ "$(echo "$repo" | tr '[:upper:]' '[:lower:]')" = "$owner.github.io" ]; then
+            base='/'
+          else
+            base="/$repo/"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "site=https://$owner.github.io$base" >> "$GITHUB_OUTPUT"
+          echo "publishing to https://$owner.github.io$base"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dashboard dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the dashboard
+        working-directory: frontend
+        env:
+          VITE_BASE: ${{ steps.base.outputs.base }}
+          VITE_SITE_URL: ${{ steps.base.outputs.site }}
+          VITE_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: npm run build
+
+      - name: Build the static API
+        # Standard library only, so this step installs nothing. Python is
+        # already on the runner image.
+        run: |
+          python3 scripts/build_static_api.py \
+            --data data \
+            --out frontend/dist/api \
+            --site-out frontend/dist \
+            --base-url '${{ steps.base.outputs.site }}api'
+
+      - name: Finish the artifact
+        run: |
+          set -euo pipefail
+          # Hash routing means every dashboard route is index.html; 404.html
+          # covers a mistyped path so visitors land on the app, not on
+          # GitHub's error page.
+          cp frontend/dist/index.html frontend/dist/404.html
+          touch frontend/dist/.nojekyll
+          echo "### 🚀 Published (${{ inputs.reason }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Site: ${{ steps.base.outputs.site }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Total artifact size: $(du -sh frontend/dist | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    # One deployment at a time across every caller. Two overlapping publishes
+    # make the Pages API reject the second; queueing makes the later one win.
+    concurrency:
+      group: github-pages-deployment
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

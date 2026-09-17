@@ -12,6 +12,11 @@ Two backends, chosen by configuration:
   redis   serverless (Vercel), where process memory does not survive between
           invocations. Backed by Upstash's REST API, so it needs no TCP
           connection pool and works inside a serverless function.
+
+  file    batch jobs (GitHub Actions). One JSON file per dataset, written
+          atomically. A workflow run reads the snapshot its predecessor
+          committed and writes the one its successor will read, so the
+          last-known-good contract survives across processes with no database.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -134,6 +140,65 @@ class MemoryStore(SnapshotStore):
         return sorted(self._current)
 
 
+class FileStore(SnapshotStore):
+    """One JSON file per dataset, written atomically.
+
+    Used by the scheduled scrapers, where each run is a separate process. The
+    write goes to a temporary file and is then renamed over the target, so a
+    run killed mid-write (a cancelled workflow, a runner timeout) can never
+    leave a half-written snapshot behind for the next run to read.
+
+    Nothing is cached beyond the snapshot currently in play: `put` replaces the
+    entry `get` loaded, so the previous version is released as soon as the new
+    one exists rather than both being held for the life of the process.
+    """
+
+    def __init__(self, directory: str | Path) -> None:
+        self._dir = Path(directory)
+        self._cache: dict[str, Snapshot] = {}
+
+    def _path(self, dataset: str) -> Path:
+        # Dataset names are internal literals ("psx.stocks"), never user input.
+        return self._dir / f"{dataset}.json"
+
+    async def get(self, dataset: str) -> Snapshot | None:
+        cached = self._cache.get(dataset)
+        if cached is not None:
+            return cached
+
+        path = self._path(dataset)
+        if not path.is_file():
+            return None
+        try:
+            snapshot = Snapshot.from_json(path.read_bytes())
+        except Exception as exc:
+            # A corrupt file must not stop the run. Treating it as "no previous
+            # snapshot" means this run republishes from scratch, which is the
+            # recoverable outcome; raising would leave the site frozen forever.
+            logger.error("file_read_failed", extra={"dataset": dataset,
+                                                    "path": str(path),
+                                                    "error": str(exc)})
+            return None
+        self._cache[dataset] = snapshot
+        return snapshot
+
+    async def get_last_good(self, dataset: str) -> Snapshot | None:
+        return await self.get(dataset)
+
+    async def put(self, snapshot: Snapshot) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        path = self._path(snapshot.dataset)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_bytes(snapshot.to_json())
+        tmp.replace(path)  # atomic on POSIX and on Windows (same directory)
+        self._cache[snapshot.dataset] = snapshot
+
+    async def datasets(self) -> list[str]:
+        if not self._dir.is_dir():
+            return []
+        return sorted(p.stem for p in self._dir.glob("*.json"))
+
+
 class RedisStore(SnapshotStore):
     """Upstash Redis over its REST API — works inside a serverless function.
 
@@ -200,7 +265,11 @@ def get_store() -> SnapshotStore:
     global _store
     if _store is None:
         s = get_settings()
-        if s.snapshot_store == "redis":
+        if s.snapshot_store == "file":
+            logger.info("snapshot_store_selected",
+                        extra={"backend": "file", "dir": s.snapshot_dir})
+            _store = FileStore(s.snapshot_dir)
+        elif s.snapshot_store == "redis":
             if not (s.redis_url and s.redis_token):
                 raise RuntimeError(
                     "SNAPSHOT_STORE=redis requires UPSTASH_REDIS_REST_URL and "

@@ -63,14 +63,27 @@ class Settings:
         # ── Snapshot store ──────────────────────────────────────────────
         # "memory" for a long-running process (Docker, Railway, local uvicorn).
         # "redis"  for serverless (Vercel), where process memory does not survive.
+        # "file"   for the GitHub Actions scrapers: a workflow run is a fresh
+        #          process on a fresh machine, so the previous snapshot arrives
+        #          as a checked-out file and the new one leaves as a committed
+        #          one. Same last-known-good contract, no database to pay for.
         # Auto-detect: if an Upstash URL is present, prefer redis.
         explicit = os.getenv("SNAPSHOT_STORE", "").strip().lower()
         self.redis_url: str = os.getenv("UPSTASH_REDIS_REST_URL", "").strip()
         self.redis_token: str = os.getenv("UPSTASH_REDIS_REST_TOKEN", "").strip()
-        if explicit in {"memory", "redis"}:
+        if explicit in {"memory", "redis", "file"}:
             self.snapshot_store = explicit
         else:
             self.snapshot_store = "redis" if self.redis_url and self.redis_token else "memory"
+        # Where SNAPSHOT_STORE=file keeps its JSON. One file per dataset.
+        self.snapshot_dir: str = os.getenv("SNAPSHOT_DIR", "data").strip() or "data"
+
+        # ── Resource ceiling ────────────────────────────────────────────
+        # A hard address-space cap for the batch jobs. A runaway parse that
+        # would otherwise swell until the runner OOM-kills it (and reports a
+        # mystery exit 137) fails immediately with a MemoryError naming the
+        # limit instead. 0 disables the cap. POSIX only; a no-op on Windows.
+        self.max_memory_mb: int = _env_int("MAX_MEMORY_MB", 0)
 
         # ── Scheduler ───────────────────────────────────────────────────
         # Serverless has no background loop; Vercel Cron calls /internal/refresh.

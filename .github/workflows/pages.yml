@@ -1,0 +1,25 @@
+name: Publish site
+
+# Republishes the dashboard and the static API without scraping anything — for
+# a change to the site itself, or to recover a deployment by hand. The data is
+# whatever the last scrape left on the data branch.
+
+on:
+  push:
+    branches: [unified-service, main]
+    paths:
+      - 'frontend/**'
+      - 'scripts/build_static_api.py'
+      - '.github/workflows/pages.yml'
+      - '.github/workflows/_pages.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    uses: ./.github/workflows/_pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      reason: ${{ github.event_name == 'push' && 'site change' || 'manual' }}

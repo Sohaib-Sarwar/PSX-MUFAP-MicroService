@@ -5,9 +5,10 @@ Pakistan market data as one API: **PSX equities** and **MUFAP mutual funds**, pl
 | | |
 |---|---|
 | **Domains** | `/api/psx/*` · `/api/mufap/*` |
-| **Coverage** | 1,020 listed PSX instruments · 546 mutual funds |
-| **Dashboard** | served at `/` (Docker) or by Vercel (serverless) |
-| **Docs** | `/docs` (Swagger) · `/redoc` |
+| **Coverage** | 1,073 listed PSX instruments · 18 indices · 549 mutual funds |
+| **Deployments** | GitHub Pages + Actions (no server) · Docker · Vercel |
+| **Dashboard** | GitHub Pages, or served at `/` by the container |
+| **Docs** | `/docs` (Swagger) · `/redoc` · [API reference page](#deploy-to-github-pages) on the site |
 
 Sibling branches: [`pk-micro-service`](../../tree/pk-micro-service) (PSX only) · [`mufap-service`](../../tree/mufap-service) (MUFAP only).
 
@@ -20,7 +21,7 @@ Sibling branches: [`pk-micro-service`](../../tree/pk-micro-service) (PSX only) �
 - [API reference](#api-reference) · [Freshness contract](#freshness-contract)
 - [Live-data strategy](#live-data-strategy) · [Caching](#caching) · [Error handling](#error-handling)
 - [Testing](#testing) · [Health checks](#health-checks) · [Monitoring](#monitoring)
-- [Deploy to Vercel](#deploy-to-vercel) · [Deploy with Docker](#deploy-with-docker)
+- [Deploy to GitHub Pages](#deploy-to-github-pages) · [Deploy to Vercel](#deploy-to-vercel) · [Deploy with Docker](#deploy-with-docker)
 - [Troubleshooting](#troubleshooting) · [License](#license)
 
 ---
@@ -69,7 +70,9 @@ request path — never blocks on an upstream
 refresh path — background only
   scheduler → fetch → parse → validate → publish → snapshot store
   (Docker)                                          ↑
-  Vercel Cron → POST /internal/refresh ─────────────┘
+  Vercel Cron → POST /internal/refresh ─────────────┤
+  GitHub Actions cron → scripts/scrape.py ──────────┘
+    → static API built from the snapshot, served by GitHub Pages
 
 app/
 ├── infra/     config · http · browser_http · store · parsing · validation
@@ -89,14 +92,28 @@ which is always either good data or explicitly marked unavailable.
   known good one. That is the whole memory bound; nothing accumulates.
 - `redis` — serverless, where process memory does not survive between
   invocations. Backed by Upstash's REST API, so no connection pool is needed.
+- `file` — batch jobs. One JSON file per dataset, written atomically. A
+  scheduled workflow run reads the snapshot its predecessor committed and writes
+  the one its successor will read, so the last-known-good contract survives
+  across processes with no database at all.
 
 ### Project structure
 
 ```
 ├── app/                    application package (see above)
 ├── api/index.py            Vercel serverless entrypoint + cron route
+├── scripts/
+│   ├── scrape.py           one domain's refresh as a batch job
+│   └── build_static_api.py snapshots → the static API tree (stdlib only)
+├── .github/
+│   ├── workflows/          scrape-psx · scrape-mufap · pages · ci
+│   └── scripts/            publish-data.sh — writes the service-data branch
 ├── frontend/               React 19 + Vite 6 dashboard (source)
+│   ├── src/lib/            data client, formatting, hooks
+│   ├── src/components/     table, freshness strip, shared UI
+│   └── src/pages/          overview · stocks · indices · funds · API reference
 ├── static/                 built dashboard, served by the Docker image
+├── docs/DEPLOYMENT.md      GitHub Pages + Actions guide
 ├── tests/
 │   ├── fixtures/           real upstream captures, committed
 │   ├── unit/               parser and merge tests
@@ -105,6 +122,7 @@ which is always either good data or explicitly marked unavailable.
 ├── docker-compose.yml
 ├── vercel.json
 ├── requirements.txt        pinned exactly
+├── requirements-scrape.txt fetch-and-parse subset for the batch jobs
 └── .env.example
 ```
 
@@ -523,6 +541,54 @@ state sits at `degraded`.
 
 Logs are structured JSON with a `request_id` on every line, so one request can
 be followed end to end. Tokens and credentials are redacted by the formatter.
+
+---
+
+## Deploy to GitHub Pages
+
+The default deployment, and the one with no server in it. GitHub Actions runs
+the scrapers on a schedule; GitHub Pages serves the dashboard and the entire
+read API as static files on a CDN.
+
+Every read endpoint of the live service is a pure function of one snapshot, so
+each one is precomputed at publish time. What a query parameter selects on the
+live API is selected here by path:
+
+```
+GET /api/psx/stocks/gainers?limit=50   →   /api/psx/stocks/gainers.json
+```
+
+Response bodies keep the live service's envelope — `count`, `total`,
+`freshness`, `data` — so a consumer written against one works against the other.
+
+### Setup
+
+1. `git push -u origin unified-service`
+2. **Settings → General → Default branch → `unified-service`.** GitHub runs
+   `schedule` triggers only from the default branch; leave it on `main` and no
+   cron will ever fire, silently.
+3. **Settings → Pages → Source → _GitHub Actions_.**
+4. **Actions → "PSX — daily close" → Run workflow**, then the same for
+   "MUFAP — evening NAV", to seed the data.
+
+The site is then at `https://<owner>.github.io/<repo>/`, with the API under
+`/api/` and a full reference page at `#/api`.
+
+### Schedule
+
+| Workflow | Pakistan time | UTC cron |
+| --- | --- | --- |
+| PSX | 17:10, Mon–Fri — after the close | `10 12 * * 1-5` |
+| MUFAP | 18:05 → 00:05 hourly, Mon–Fri | `5 13-19 * * 1-5` |
+
+PSX publishes one closing board per trading day, so it is fetched once. MUFAP
+strikes NAV once per business day but at no fixed hour, so the evening is swept —
+and each run exits without opening a connection if the published validity date
+already covers the current session, which typically costs one or two fetches out
+of a possible seven.
+
+Full setup, resource budget, policy notes and troubleshooting:
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ---
 
