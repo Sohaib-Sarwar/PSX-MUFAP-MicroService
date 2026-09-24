@@ -1,7 +1,9 @@
 """Test fixtures backed by real upstream captures.
 
 Every fixture in tests/fixtures/ is a verbatim response captured from the live
-upstream on 2026-09-13. Tests assert exact values for known rows, which is what
+upstream: MUFAP and the PSX index board on 2026-09-13, the PSX screener, trading
+panel and company page on 2026-09-25, after PSX withdrew its bulk quote feeds.
+The screener capture is trimmed to 60 rows; nothing else is altered. Tests assert exact values for known rows, which is what
 catches a parser regression — a shape-only assertion would have passed happily
 while the old positional fallback reported CNERGY's volume as 4.
 """
@@ -27,6 +29,10 @@ os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("INTERNAL_TOKEN", "test-token")
 os.environ.setdefault("RATE_LIMIT_PER_MINUTE", "0")
 os.environ.setdefault("SERVE_STATIC", "false")
+# The per-instrument quote pass is a live-network feature; tests exercise
+# the pipeline, not PSX's willingness to serve 120 pages.
+os.environ.setdefault("PSX_DETAIL_BUDGET", "2")
+os.environ.setdefault("PSX_DETAIL_PAUSE_SECONDS", "0")
 
 
 def fixture_text(name: str) -> str:
@@ -63,23 +69,23 @@ def domains() -> tuple[str, ...]:
 
 
 @pytest.fixture
-def market_watch_html() -> str:
-    return fixture_text("psx_market_watch.html")
+def screener_html() -> str:
+    return fixture_text("psx_screener.html")
+
+
+@pytest.fixture
+def trading_panel_html() -> str:
+    return fixture_text("psx_trading_panel.html")
+
+
+@pytest.fixture
+def company_html() -> str:
+    return fixture_text("psx_company_ogdc.html")
 
 
 @pytest.fixture
 def indices_html() -> str:
     return fixture_text("psx_indices.html")
-
-
-@pytest.fixture
-def symbols_payload():
-    return fixture_json("psx_symbols.json")
-
-
-@pytest.fixture
-def timeseries_payload():
-    return fixture_json("psx_timeseries_int.json")
 
 
 @pytest.fixture
@@ -97,8 +103,12 @@ def stub_upstream(monkeypatch):
     """Route every upstream fetch to a captured fixture — no network in tests."""
 
     async def fake_text(url: str, **_):
-        if "market-watch" in url:
-            return fixture_text("psx_market_watch.html")
+        if "/screener" in url:
+            return fixture_text("psx_screener.html")
+        if "/trading-panel" in url:
+            return fixture_text("psx_trading_panel.html")
+        if "/company/" in url:
+            return fixture_text("psx_company_ogdc.html")
         if "/indices" in url:
             return fixture_text("psx_indices.html")
         if "tab=1" in url:
@@ -108,10 +118,6 @@ def stub_upstream(monkeypatch):
         raise AssertionError(f"unstubbed text fetch: {url}")
 
     async def fake_json(url: str, **_):
-        if url.endswith("/symbols"):
-            return fixture_json("psx_symbols.json")
-        if "/timeseries/" in url:
-            return fixture_json("psx_timeseries_int.json")
         raise AssertionError(f"unstubbed json fetch: {url}")
 
     modules = [f"app.{d}.service" for d in DOMAINS]

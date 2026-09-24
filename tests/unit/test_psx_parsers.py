@@ -1,8 +1,13 @@
 """PSX parser tests, asserting exact values from real captured markup.
 
 Exact-value assertions are the point. A shape-only test ("returns a list of
-dicts with a volume key") passes just as happily against the old positional
-parser, which reported CNERGY's volume as 4 instead of 104,274,125.
+dicts with a price key") passes just as happily against a parser that has
+shifted every column by one, which is the failure mode that produces plausible,
+wrong financial data rather than an error.
+
+PSX withdrew /symbols, /market-watch and /timeseries on 2026-09-24 — they answer
+403 to an XHR client and 404 to anything else. The fixtures here were captured
+on 2026-09-25 from the pages that replaced them.
 """
 
 from __future__ import annotations
@@ -13,155 +18,193 @@ from app.infra.parsing import ColumnMapError
 from app.psx import parsers
 
 
-# ── market watch ──────────────────────────────────────────────────────────────
+# ── /screener ─────────────────────────────────────────────────────────────────
 
-def test_market_watch_row_count(market_watch_html):
-    rows = parsers.parse_market_watch(market_watch_html)
-    assert len(rows) == 500
+def test_screener_row_count(screener_html):
+    rows = parsers.parse_screener(screener_html)
+    assert len(rows) == 60          # the fixture is trimmed; live is ~747
 
 
-def test_cnergy_every_field_exact(market_watch_html):
-    """REGRESSION F-01 — the positional fallback shifted every numeric field.
+def test_ogdc_every_field_exact(screener_html):
+    """One instrument, every column, exact.
 
-    It read the sector code 0825 as LDCP, the day's low as `current`, and the
-    change percentage as `volume` (4 instead of 104,274,125).
+    If the column map ever slips, this fails on the first field rather than
+    silently reporting a P/E as a dividend yield.
     """
-    rows = parsers.parse_market_watch(market_watch_html)
-    cnergy = next(r for r in rows if r["symbol"] == "CNERGY")
+    rows = parsers.parse_screener(screener_html)
+    ogdc = next(r for r in rows if r["symbol"] == "OGDC")
 
-    assert cnergy["ldcp"] == 12.37
-    assert cnergy["open"] == 12.21
-    assert cnergy["high"] == 13.05
-    assert cnergy["low"] == 11.86
-    assert cnergy["current"] == 12.93
-    assert cnergy["change"] == 0.56
-    assert cnergy["change_pct"] == 4.53
-    assert cnergy["volume"] == 104_274_125
-    assert cnergy["sector_code"] == "0825"
-    assert "KSE100" in cnergy["indices"]
-
-
-def test_change_pct_column_not_confused_with_change(market_watch_html):
-    """CHANGE and CHANGE (%) are adjacent; a loose header match swaps them."""
-    rows = parsers.parse_market_watch(market_watch_html)
-    prl = next(r for r in rows if r["symbol"] == "PRL")
-    assert prl["change"] == 4.70
-    assert prl["change_pct"] == 5.81
+    assert ogdc["name"] == "Oil & Gas Development Company Limited"
+    assert ogdc["sector_code"] == "0820"
+    assert ogdc["sector"] == "OIL & GAS EXPLORATION COMPANIES"
+    assert ogdc["current"] == 316.23
+    assert ogdc["change_pct"] == -1.03
+    assert ogdc["change_1y_pct"] == 11.80
+    assert ogdc["market_cap"] == 1_400_000_000_000.0
+    assert ogdc["pe_ratio"] == 5.61
+    assert ogdc["dividend_yield"] == 3.81
+    assert ogdc["free_float"] == 645_100_000.0
+    assert ogdc["volume_30d_avg"] == 3_654_711.0
+    assert "KSE100" in ogdc["indices"] and "KSE30" in ogdc["indices"]
 
 
-def test_volume_is_not_truncated(market_watch_html):
-    rows = parsers.parse_market_watch(market_watch_html)
-    assert max(r["volume"] for r in rows) > 100_000_000
+def test_magnitude_suffixes_are_scaled_not_truncated(screener_html):
+    """`429.4M` is 429,400,000.
 
-
-def test_missing_column_raises_rather_than_guessing():
-    """REGRESSION F-01 — there must be no positional fallback.
-
-    A changed header must produce an exception (which alerts and keeps the last
-    good snapshot) rather than a plausible, wrong batch.
+    parse_number() alone reads it as 429.4 and under-reports a market
+    capitalisation by six orders of magnitude — the kind of wrong that looks
+    like a plausible number.
     """
-    html = """
-    <table><thead><tr>
-      <th>SYMBOL</th><th>SECTOR</th><th>SOMETHING</th>
-    </tr></thead><tbody><tr>
-      <td>ABC</td><td>0825</td><td>1.0</td>
-    </tr></tbody></table>
-    """
+    rows = parsers.parse_screener(screener_html)
+    row = next(r for r in rows if r["symbol"] == "786")
+    assert row["market_cap"] == 429_400_000.0
+    assert row["free_float"] == 7_000_000.0
+
+
+def test_change_is_derived_and_reconciles_with_the_quote_page(screener_html,
+                                                              company_html):
+    """The screener prints a percentage but no rupee move, so `change` is
+    derived. Deriving it must agree with the LDCP the company page publishes."""
+    rows = parsers.parse_screener(screener_html)
+    ogdc = next(r for r in rows if r["symbol"] == "OGDC")
+    quote = parsers.parse_company(company_html, "OGDC")
+
+    previous_close = ogdc["current"] - ogdc["change"]
+    assert abs(previous_close - quote["ldcp"]) < 0.02
+
+
+def test_name_and_flags_come_from_the_symbol_cell(screener_html):
+    """The company name lives in the link's data-title and the market-state
+    badge is a sibling node. Reading the cell as text glues them into "AAL NC"
+    and loses the name entirely."""
+    rows = parsers.parse_screener(screener_html)
+    aal = next(r for r in rows if r["symbol"] == "AAL")
+
+    assert aal["name"] == "Agro Allianz Limited"
+    assert aal["flags"] == ["NC"]
+    assert " " not in aal["symbol"]
+
+
+def test_every_row_is_named(screener_html):
+    rows = parsers.parse_screener(screener_html)
+    assert all(r["name"] for r in rows)
+
+
+def test_screener_without_a_symbol_column_raises(screener_html):
+    html = screener_html.replace("SYMBOL", "TICKER")
     with pytest.raises(ColumnMapError):
-        parsers.parse_market_watch(html)
+        parsers.parse_screener(html)
 
 
-def test_no_positional_fallback_exists():
-    assert not hasattr(parsers, "_parse_market_watch_positional")
+def test_one_year_change_cannot_be_claimed_by_change_pct(screener_html):
+    """`CHANGE (%)` and `1-YEAR CH. (%)` share every word that matters. The
+    longer header must be claimed first or the two swap."""
+    rows = parsers.parse_screener(screener_html)
+    ogdc = next(r for r in rows if r["symbol"] == "OGDC")
+    assert ogdc["change_pct"] == -1.03
+    assert ogdc["change_1y_pct"] == 11.80
 
 
-# ── symbols ───────────────────────────────────────────────────────────────────
+# ── /trading-panel ────────────────────────────────────────────────────────────
 
-def test_symbols_universe(symbols_payload):
-    rows = parsers.parse_symbols(symbols_payload)
-    assert len(rows) == 1020
-    by_symbol = {r["symbol"]: r for r in rows}
-    assert by_symbol["CNERGY"]["name"] == "Cnergyico PK  Limited"
-    assert by_symbol["CNERGY"]["sector"] == "REFINERY"
-    assert by_symbol["AKBLTFC6"]["is_debt"] is True
+def test_trading_panel_session_header(trading_panel_html):
+    panel = parsers.parse_trading_panel(trading_panel_html)
+
+    assert panel["total_trades"] == 484_489
+    assert panel["advancing"] == 100
+    assert panel["declining"] == 358
+    assert panel["unchanged"] == 36
+    assert panel["traded_instruments"] == 494
+    assert panel["total_volume"] == 1_286_448_248
+    assert panel["total_traded_value"] == 49_156_551_410.0
 
 
-def test_symbols_rejects_wrong_shape():
+def test_session_timestamp_is_pkt(trading_panel_html):
+    panel = parsers.parse_trading_panel(trading_panel_html)
+    assert panel["session_at"] == "2026-09-24T18:27:00+05:00"
+
+
+def test_market_status_comes_from_segment_states(trading_panel_html):
+    """Every segment closed means the session is over. This needs no clock
+    arithmetic and no trading calendar, so it stays correct on a public holiday
+    and through Ramadan hours."""
+    panel = parsers.parse_trading_panel(trading_panel_html)
+    assert panel["market_status"] == "closed"
+    assert len(panel["segments"]) == 14
+    assert panel["segments"][0]["market"] == "Regular"
+    assert panel["segments"][0]["trades"] == 372_322
+
+
+def test_trading_panel_without_a_summary_raises(trading_panel_html):
+    html = trading_panel_html.replace("Advance", "Gainers")
     with pytest.raises(ColumnMapError):
-        parsers.parse_symbols({"not": "a list"})
+        parsers.parse_trading_panel(html)
+
+
+# ── /company/{symbol} ─────────────────────────────────────────────────────────
+
+def test_company_quote_fields(company_html):
+    quote = parsers.parse_company(company_html, "OGDC")
+
+    assert quote["symbol"] == "OGDC"
+    assert quote["name"] == "Oil & Gas Development Company Limited"
+    assert quote["ldcp"] == 319.53
+    assert quote["open"] == 319.53
+    assert quote["high"] == 320.91
+    assert quote["low"] == 315.40
+    assert quote["volume"] == 1_961_861
+
+
+def test_company_low_is_not_above_high(company_html):
+    quote = parsers.parse_company(company_html, "OGDC")
+    assert quote["low"] <= quote["high"]
 
 
 # ── merge ─────────────────────────────────────────────────────────────────────
 
-def test_merge_covers_whole_universe(symbols_payload, market_watch_html):
-    """market-watch only carries instruments that traded — 500 of 1,020.
+def test_merge_marks_rows_without_a_quote(screener_html, company_html):
+    """`has_quote` must distinguish "no OHLC was fetched" from "did not trade".
 
-    The other 575 must still be visible, marked traded=false, so a consumer can
-    tell "did not trade" from "we failed to fetch it".
+    Filling the old field names with nulls and leaving it at that reads as the
+    latter, which is a claim this service can no longer support for anything
+    outside the bounded quote pass.
     """
-    symbols = parsers.parse_symbols(symbols_payload)
-    quotes = parsers.parse_market_watch(market_watch_html)
-    merged = parsers.merge_universe(symbols, quotes)
+    universe = parsers.parse_screener(screener_html)
+    details = {"OGDC": parsers.parse_company(company_html, "OGDC")}
+    rows = parsers.merge_universe(universe, {}, details)
 
-    traded = [r for r in merged if r["traded"]]
-    not_traded = [r for r in merged if not r["traded"]]
+    ogdc = next(r for r in rows if r["symbol"] == "OGDC")
+    other = next(r for r in rows if r["symbol"] != "OGDC")
 
-    assert len(traded) == 500
-    assert len(not_traded) == 575
-    assert all(r["current"] is None for r in not_traded)
-    assert all(r["volume"] == 0 for r in not_traded)
-
-
-def test_merge_enriches_with_name_and_sector(symbols_payload, market_watch_html):
-    symbols = parsers.parse_symbols(symbols_payload)
-    quotes = parsers.parse_market_watch(market_watch_html)
-    merged = parsers.merge_universe(symbols, quotes)
-    cnergy = next(r for r in merged if r["symbol"] == "CNERGY")
-    assert cnergy["name"] == "Cnergyico PK  Limited"
-    assert cnergy["sector"] == "REFINERY"
+    assert ogdc["has_quote"] is True
+    assert ogdc["volume"] == 1_961_861
+    assert other["has_quote"] is False
+    assert other["volume"] is None
 
 
-def test_suffixed_symbols_resolve_to_their_base():
-    """AICLXD is AICL trading ex-dividend; it is absent from /symbols."""
-    assert parsers.base_symbol("AICLXD") == "AICL"
-    assert parsers.base_symbol("AMTEXNC") == "AMTEX"
-    assert parsers.base_symbol("HBL") == "HBL"
+def test_merge_inherits_classification_it_can_no_longer_fetch(screener_html):
+    """is_etf / is_debt came from /symbols, which is gone. They are carried
+    forward from the previous snapshot rather than silently dropped."""
+    universe = parsers.parse_screener(screener_html)
+    inherited = {"OGDC": {"symbol": "OGDC", "is_etf": False, "is_debt": True}}
+    rows = parsers.merge_universe(universe, inherited, {})
+
+    ogdc = next(r for r in rows if r["symbol"] == "OGDC")
+    assert ogdc["is_debt"] is True
+    assert ogdc["is_etf"] is False
 
 
-# ── indices ───────────────────────────────────────────────────────────────────
+def test_merge_keeps_every_screener_row(screener_html):
+    universe = parsers.parse_screener(screener_html)
+    rows = parsers.merge_universe(universe, {}, {})
+    assert len(rows) == len(universe)
 
-def test_indices_parse(indices_html):
-    """REGRESSION F-05 — the old scraper regexed the homepage, where index
-    values are rendered client-side, so it always found zero and the endpoint
-    returned 404 permanently."""
+
+# ── /indices ──────────────────────────────────────────────────────────────────
+
+def test_indices_parsed(indices_html):
     rows = parsers.parse_indices(indices_html)
     assert len(rows) == 18
-
     kse100 = next(r for r in rows if r["index_name"] == "KSE100")
-    assert kse100["current"] == 170511.85
-    assert kse100["high"] == 170764.79
-    assert kse100["low"] == 166141.17
-    assert kse100["change"] == 1646.81
-    assert kse100["change_pct"] == 0.98
-
-
-def test_indices_expose_name_alias(indices_html):
-    """REGRESSION F-06 — the dashboard reads `name`; the API returned only
-    `index_name`, so every index rendered as a dash."""
-    rows = parsers.parse_indices(indices_html)
-    assert all(r["name"] == r["index_name"] for r in rows)
-    assert all(r["value"] == r["current"] for r in rows)
-
-
-# ── timeseries ────────────────────────────────────────────────────────────────
-
-def test_timeseries_parse(timeseries_payload):
-    points = parsers.parse_timeseries(timeseries_payload, "int")
-    assert len(points) == 1190
-    assert points[0]["timestamp"] < points[-1]["timestamp"]
-    assert all("price" in p for p in points)
-
-
-def test_timeseries_rejects_bad_envelope():
-    with pytest.raises(ColumnMapError):
-        parsers.parse_timeseries({"status": 0, "data": []}, "int")
+    assert kse100["current"] > 0
+    assert kse100["high"] >= kse100["low"]

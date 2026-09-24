@@ -117,7 +117,11 @@ def quote_anomalies(row: dict) -> list[str]:
         if abs(implied - change) > max(0.05, abs(implied) * 0.02):
             flags.append("change_does_not_reconcile")
 
-    if (row.get("volume") or 0) == 0 and row.get("traded"):
+    # Only meaningful where a session volume was actually fetched. PSX withdrew
+    # the bulk quote feed, so most rows carry no volume at all, and flagging
+    # those as "zero volume" would annotate 739 of 747 instruments with an
+    # observation about data this service never had.
+    if row.get("has_quote") and (row.get("volume") or 0) == 0:
         flags.append("zero_volume")
 
     return flags

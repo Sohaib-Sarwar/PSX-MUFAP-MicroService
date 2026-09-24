@@ -1,20 +1,20 @@
 name: MUFAP — evening NAV
 
 # MUFAP strikes NAV once per business day and publishes it some time during the
-# evening. The hour it lands varies, so the window is swept hourly rather than
-# guessed at:
+# evening. The hour it lands varies, so the window is swept hourly:
 #
-#   13:05–19:05 UTC = 18:05–00:05 PKT, Monday to Friday.
+#   13:00–19:00 UTC = 18:00, 19:00, 20:00, 21:00, 22:00, 23:00, 00:00 PKT,
+#   Monday to Friday.
 #
-# The sweep stops itself. Each run first reads the published snapshot, and if
-# the NAV validity date already covers the current session it exits without
-# opening a connection — so a normal evening costs one or two fetches, not
-# seven, and MUFAP sees the smallest number of requests that still catches the
-# publication on the hour it happens.
+# Every run fetches and republishes. An earlier version skipped once the
+# published validity date looked current, which saved requests but meant a
+# correction issued at 22:00 to a NAV struck at 18:00 would never be collected.
+# Seven fetches an evening is a small price for the published figure always
+# being the one MUFAP is serving right now.
 
 on:
   schedule:
-    - cron: '5 13-19 * * 1-5'
+    - cron: '0 13-19 * * 1-5'
   workflow_dispatch:
     inputs:
       force:
@@ -33,12 +33,11 @@ jobs:
       contents: write
     with:
       domain: mufap
-      skip_if_current: true
       force: ${{ inputs.force == true }}
 
   publish:
     needs: scrape
-    if: needs.scrape.outputs.status != 'skipped' && needs.scrape.outputs.status != 'failed'
+    if: needs.scrape.outputs.status != 'failed'
     uses: ./.github/workflows/_pages.yml
     permissions:
       contents: read

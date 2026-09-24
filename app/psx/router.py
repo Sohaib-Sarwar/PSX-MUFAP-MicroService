@@ -11,7 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 
 from ..infra.config import get_settings
-from ..infra.errors import BadRequest, NotFound
+from ..infra.errors import NotFound
 from ..infra.responses import (
     apply_filters,
     contains,
@@ -30,6 +30,9 @@ router = APIRouter(prefix="/api/psx", tags=["PSX Stock Exchange"])
 SORTABLE = (
     "symbol", "name", "sector", "ldcp", "open", "high", "low",
     "current", "change", "change_pct", "volume",
+    # Published by /screener since PSX withdrew the bulk quote feed.
+    "change_1y_pct", "market_cap", "pe_ratio", "dividend_yield",
+    "free_float", "volume_30d_avg",
 )
 
 _PRICE_FIELDS = ("ldcp", "open", "high", "low", "current", "change")
@@ -65,6 +68,16 @@ async def psx_root() -> dict[str, Any]:
 @router.get("/market-status", summary="Whether PSX is currently trading")
 async def market_status() -> dict[str, Any]:
     return await service.derive_market_status()
+
+
+@router.get("/session", summary="Session totals and per-market segment states")
+async def session() -> dict[str, Any]:
+    snapshot = await service.get_session_snapshot()
+    return {
+        **(snapshot.meta or {}),
+        "segments": snapshot.rows,
+        "freshness": snapshot.freshness(_stale_after()),
+    }
 
 
 @router.get("/stocks", summary="All listed instruments, filtered and paginated")
@@ -212,25 +225,6 @@ async def list_indices() -> dict[str, Any]:
     ]
     return envelope(shaped, snapshot=snapshot, stale_after_s=_stale_after(),
                     total=len(shaped), offset=0, limit=None)
-
-
-@router.get("/series/{symbol}", summary="Intraday or end-of-day price series")
-async def series(
-    symbol: str,
-    kind: str = Query("int", pattern="^(int|eod)$",
-                      description="int = intraday, eod = end of day"),
-) -> dict[str, Any]:
-    if not symbol.isalnum():
-        raise BadRequest("Symbol must be alphanumeric.")
-    points = await service.get_timeseries(symbol, kind)
-    if not points:
-        raise NotFound(f"No {kind} series available for '{symbol.upper()}'.")
-    return {
-        "symbol": symbol.upper(),
-        "kind": kind,
-        "count": len(points),
-        "data": points,
-    }
 
 
 # ── internal: refresh ─────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import {
   FiAward,
   FiBarChart2,
   FiBriefcase,
+  FiClock,
   FiLayers,
   FiMinus,
   FiPieChart,
@@ -15,7 +16,10 @@ import {
 import Freshness from '../components/Freshness'
 import { Card, Failed, Loading, Stat } from '../components/ui'
 import { useData } from '../lib/hooks'
-import { compact, direction, int, num, pct, pkr, titleCase } from '../lib/format'
+import { ago, clock, compact, direction, int, num, pct, pkr, titleCase } from '../lib/format'
+
+// The tile is narrow; the strip under each table carries the full instant.
+const shortClock = (value) => clock(value).replace(/^(\d{2} \w{3}) \d{4},/, '$1')
 
 const RESOURCES = ['summary', 'indices', 'stocks', 'sectors', 'fundStats', 'funds']
 
@@ -27,8 +31,7 @@ export default function Overview({ nonce, onNavigate }) {
     const [summary, indices, stocks, sectors, fundStats, funds] = state.bodies
 
     const stockRows = stocks.data || []
-    const traded = stockRows.filter((row) => row.traded)
-    const withMove = traded.filter((row) => row.change_pct != null)
+    const withMove = stockRows.filter((row) => row.change_pct != null && row.change_pct !== 0)
 
     const rank = (ascending) =>
       [...withMove].sort((a, b) =>
@@ -88,6 +91,13 @@ export default function Overview({ nonce, onNavigate }) {
           label="Volume"
           value={compact(breadth.total_volume)}
           note={`${pkr(breadth.total_traded_value)} traded`}
+          tone="brand"
+        />
+        <Stat
+          icon={FiClock}
+          label="Data fetched"
+          value={shortClock(stocks.freshness?.fetched_at)}
+          note={`PSX · ${ago((Date.now() - Date.parse(stocks.freshness?.fetched_at || 0)) / 1000)}`}
           tone="brand"
         />
         <Stat
@@ -182,7 +192,7 @@ export default function Overview({ nonce, onNavigate }) {
       <Card
         icon={FiPieChart}
         title="Sector activity"
-        subtitle="Busiest sectors by traded volume"
+        subtitle="Largest sectors by combined market capitalisation"
         flush
       >
         <div className="table-wrap">
@@ -190,27 +200,27 @@ export default function Overview({ nonce, onNavigate }) {
             <thead>
               <tr>
                 <th scope="col">Sector</th>
-                <th scope="col" className="right">Traded</th>
+                <th scope="col" className="right">Instruments</th>
                 <th scope="col" className="right hide-sm">Advancing</th>
                 <th scope="col" className="right hide-sm">Declining</th>
-                <th scope="col" className="right">Volume</th>
+                <th scope="col" className="right">Market cap</th>
                 <th scope="col" className="right">Avg move</th>
               </tr>
             </thead>
             <tbody>
               {view.sectors.map((sector) => {
                 const dir = direction(sector.avg_change_pct)
-                const share = view.sectors[0].volume
-                  ? (sector.volume / view.sectors[0].volume) * 100
+                const share = view.sectors[0].market_cap
+                  ? (sector.market_cap / view.sectors[0].market_cap) * 100
                   : 0
                 return (
                   <tr key={sector.sector}>
                     <td>{titleCase(sector.sector)}</td>
-                    <td className="right num">{int(sector.traded)}</td>
+                    <td className="right num">{int(sector.instruments)}</td>
                     <td className="right num hide-sm delta--up">{int(sector.gainers)}</td>
                     <td className="right num hide-sm delta--down">{int(sector.losers)}</td>
                     <td className="right num barcell">
-                      {compact(sector.volume)}
+                      {compact(sector.market_cap)}
                       <span
                         className="bar"
                         style={{ width: `${Math.max(share * 0.6, 2)}px`, '--tone': `var(--${dir})` }}
@@ -248,7 +258,7 @@ function MoverCard({ title, icon, rows, tone, onNavigate }) {
               <th scope="col">Symbol</th>
               <th scope="col" className="right">Price</th>
               <th scope="col" className="right">Change</th>
-              <th scope="col" className="right hide-sm">Volume</th>
+              <th scope="col" className="right hide-sm">Market cap</th>
             </tr>
           </thead>
           <tbody>
@@ -269,7 +279,7 @@ function MoverCard({ title, icon, rows, tone, onNavigate }) {
                     {num(row.change)}
                   </span>
                 </td>
-                <td className="right num hide-sm">{compact(row.volume)}</td>
+                <td className="right num hide-sm">{compact(row.market_cap)}</td>
               </tr>
             ))}
           </tbody>

@@ -1,13 +1,25 @@
-import { FiAlertCircle, FiClock, FiDatabase, FiRefreshCw, FiZap } from 'react-icons/fi'
+import {
+  FiAlertCircle,
+  FiClock,
+  FiDatabase,
+  FiDownloadCloud,
+  FiRefreshCw,
+  FiZap,
+} from 'react-icons/fi'
 import { freshnessNow } from '../lib/client'
-import { ago, day, moment, until } from '../lib/format'
+import { ago, clock, day, moment, until } from '../lib/format'
 
 /**
  * The freshness envelope, rendered.
  *
- * Every response the service publishes carries one, and showing it is the
- * whole point: a dashboard that cannot distinguish live prices from Friday's
- * close re-read on a Sunday is a dashboard that quietly lies twice a week.
+ * Every response the service publishes carries one, and showing it is the whole
+ * point: a dashboard that cannot distinguish live prices from Friday's close
+ * re-read on a Sunday is a dashboard that quietly lies twice a week.
+ *
+ * The fetch time is shown as an absolute instant, not only as "12m ago".
+ * Relative age answers "is this recent"; it does not answer "which session am I
+ * looking at", and for a NAV struck once a business day that is the question
+ * being asked.
  */
 
 const LABEL = {
@@ -29,9 +41,8 @@ export default function Freshness({ freshness, label }) {
   if (!live) return null
 
   const Icon = ICON[live.state] || FiClock
-  // PSX reports a trade timestamp, MUFAP a NAV validity date. Formatting a
-  // bare date as a datetime invents a time it never had — "18 Sept, 05:00"
-  // for what the source published as 2026-09-18.
+  // PSX reports a trade timestamp, MUFAP a NAV validity date. Formatting a bare
+  // date as a datetime invents a time it never had.
   const asOf = String(live.data_as_of || '')
   const asOfText = asOf.includes('T') ? moment(asOf) : day(asOf)
 
@@ -43,32 +54,28 @@ export default function Freshness({ freshness, label }) {
         {LABEL[live.state] || live.state}
       </span>
 
+      <span className="fresh-primary" title={live.fetched_at || ''}>
+        <FiDownloadCloud aria-hidden="true" />
+        fetched <b>{clock(live.fetched_at)}</b>
+        <span className="fresh-rel">({ago(live.age_seconds)})</span>
+      </span>
+
       {live.data_as_of && (
         <span>
-          data as of <b>{asOfText}</b>
+          priced <b>{asOfText}</b>
         </span>
       )}
 
-      <span>
-        <FiRefreshCw
-          aria-hidden="true"
-          style={{ verticalAlign: '-2px', marginRight: 5, width: 12, height: 12 }}
-        />
-        fetched <b>{ago(live.age_seconds)}</b>
-      </span>
-
       {live.next_refresh_at && (
         <span>
-          next run <b>{until(live.next_refresh_at)}</b>
+          <FiRefreshCw aria-hidden="true" className="fresh-ic" />
+          next <b>{until(live.next_refresh_at)}</b>
         </span>
       )}
 
       {live.record_count != null && (
         <span>
-          <FiDatabase
-            aria-hidden="true"
-            style={{ verticalAlign: '-2px', marginRight: 5, width: 12, height: 12 }}
-          />
+          <FiDatabase aria-hidden="true" className="fresh-ic" />
           <b>{live.record_count.toLocaleString()}</b> records
         </span>
       )}

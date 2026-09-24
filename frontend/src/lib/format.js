@@ -75,6 +75,27 @@ export function moment(value) {
   })
 }
 
+/** "25 Sep 2026, 01:32 PKT" — the absolute instant, always in Pakistan time.
+ *
+ * "4m ago" answers "is this recent"; it does not answer "which session is
+ * this". For a NAV struck once a day, the second question is the one that
+ * matters, so both are shown rather than only the relative one.
+ */
+export function clock(value) {
+  if (!value) return DASH
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return String(value)
+  return `${parsed.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Karachi',
+  })} PKT`
+}
+
 /** "4m ago" / "2d ago". Takes seconds. */
 export function ago(seconds) {
   if (!isNum(seconds) || seconds < 0) return DASH

@@ -170,10 +170,10 @@ def test_f08_dates_are_never_defaulted_to_today():
 def test_f09_prices_are_exact_not_float32(client):
     """float32 downcasting made 12.93 serialise as 12.930000305175781 and grew
     the payload 30%."""
-    body = client.get("/api/psx/stocks?limit=50&sort_by=volume").json()
-    cnergy = next(r for r in body["data"] if r["symbol"] == "CNERGY")
-    assert cnergy["current"] == 12.93
-    assert len(str(cnergy["current"])) <= 6
+    body = client.get("/api/psx/stocks?limit=50&sort_by=market_cap").json()
+    ogdc = next(r for r in body["data"] if r["symbol"] == "OGDC")
+    assert ogdc["current"] == 316.23
+    assert len(str(ogdc["current"])) <= 7
 
     raw = client.get("/api/psx/stocks?limit=50").text
     assert "0000305175781" not in raw
@@ -192,9 +192,13 @@ def test_f12_unknown_sort_field_is_an_error_not_a_silent_noop(client):
 
 @requires_psx
 def test_f12_valid_sort_actually_sorts(client):
-    body = client.get("/api/psx/stocks?sort_by=volume&ascending=false&limit=5").json()
-    volumes = [r["volume"] for r in body["data"]]
-    assert volumes == sorted(volumes, reverse=True)
+    # Sorted on market_cap rather than volume: PSX withdrew the bulk quote feed
+    # on 2026-09-24, so volume is null for every instrument outside the bounded
+    # per-symbol pass and sorting on it would compare nulls.
+    body = client.get("/api/psx/stocks?sort_by=market_cap&ascending=false&limit=5").json()
+    caps = [r["market_cap"] for r in body["data"]]
+    assert caps == sorted(caps, reverse=True)
+    assert all(c is not None for c in caps)
 
 
 # ── F-13 — one response envelope across both domains ──────────────────────────

@@ -102,8 +102,8 @@ so the mapping is a fixed five-hour shift with no seasonal correction.
 
 | Workflow | PKT | UTC cron | Runs per week |
 | --- | --- | --- | --- |
-| `scrape-psx.yml` | 17:10, Mon–Fri | `10 12 * * 1-5` | 5 |
-| `scrape-mufap.yml` | 18:05 → 00:05 hourly, Mon–Fri | `5 13-19 * * 1-5` | up to 35, typically 5–10 |
+| `scrape-psx.yml` | 17:00, Mon–Fri | `0 12 * * 1-5` | 5 |
+| `scrape-mufap.yml` | 18:00 → 00:00 hourly, Mon–Fri | `0 13-19 * * 1-5` | 35 |
 | `pages.yml` | on change only | — | — |
 | `ci.yml` | on push and PR | — | — |
 
@@ -114,15 +114,16 @@ at. Neither upstream changes between runs, which is the whole argument for the
 cadence: the previous deployment polled every 30 minutes around the clock and
 roughly four fetches in five returned data that had not moved.
 
-**The MUFAP sweep stops itself.** Each run reads the published snapshot first,
-and if the NAV validity date already covers the current session it exits without
-opening a connection to mufap.com.pk. A normal evening therefore costs one or two
-fetches out of a possible seven. The session date is computed with a six-hour
-shift so the run that fires at midnight is attributed to the session that just
-ended rather than to the day that just began.
+**Every run fetches and replaces.** An earlier version skipped once the
+published NAV validity date looked current, which saved requests but meant a
+correction issued at 22:00 to a figure struck at 18:00 would never be collected.
+Seven fetches an evening is a small price for the published number always being
+the one MUFAP is serving right now. `scripts/scrape.py` still accepts
+`--skip-if-current` for manual use; no workflow passes it.
 
-**Minutes 10 and 05, not 00.** GitHub's scheduler is busiest at the top of the
-hour and queues cron runs the longest there.
+**Storage does not grow.** Each run rewrites `service-data` as a single orphan
+commit, so the branch costs what the current snapshot costs and nothing more,
+however many times a day it is replaced.
 
 **Scheduled workflows drift, and they expire.** A run can land several minutes
 late under load, and GitHub disables scheduled workflows in a public repository

@@ -14,17 +14,8 @@ on:
         description: psx or mufap
         required: true
         type: string
-      skip_if_current:
-        # Underscores, not hyphens: GitHub's expression parser reads `-` as
-        # subtraction, so `inputs.skip-if-current` is an arithmetic expression
-        # over three undefined names, and evaluates to 0 rather than failing.
-        description: >-
-          Exit without touching the upstream when the published snapshot
-          already covers the current session date.
-        type: boolean
-        default: false
       force:
-        description: Fetch even when skip-if-current would skip.
+        description: Reserved. Every scheduled run already fetches unconditionally.
         type: boolean
         default: false
     outputs:
@@ -113,7 +104,6 @@ jobs:
           # command: an expression that renders empty would otherwise leave
           # a bare line-continuation in the middle of it.
           flags=""
-          if [ "${{ inputs.skip_if_current }}" = "true" ]; then flags="$flags --skip-if-current"; fi
           if [ "${{ inputs.force }}" = "true" ]; then flags="$flags --force"; fi
 
           python scripts/scrape.py \

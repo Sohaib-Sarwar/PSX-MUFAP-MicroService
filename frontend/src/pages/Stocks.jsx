@@ -11,13 +11,14 @@ import DataTable from '../components/DataTable'
 import Freshness from '../components/Freshness'
 import { Badge, Card, Failed, Loading, Search, Segmented, Select, Stat } from '../components/ui'
 import { useData, useDebounced, usePage, useSort } from '../lib/hooks'
-import { compact, direction, int, num, pct, pkr, titleCase } from '../lib/format'
+import { DASH, compact, direction, int, num, pct, pkr, titleCase } from '../lib/format'
 
 const VIEWS = [
-  { id: 'active', label: 'Most active' },
+  { id: 'all', label: 'All listed' },
   { id: 'gainers', label: 'Gainers' },
   { id: 'losers', label: 'Losers' },
-  { id: 'all', label: 'All listed' },
+  { id: 'active', label: 'Most traded' },
+  { id: 'quoted', label: 'Full quote' },
 ]
 
 const COLUMNS = [
@@ -60,32 +61,62 @@ const COLUMNS = [
       )
     },
   },
-  { key: 'volume', header: 'Volume', align: 'right', render: (row) => <span className="num">{compact(row.volume)}</span> },
   {
-    key: 'open',
-    header: 'Open',
+    key: 'market_cap',
+    header: 'Market cap',
     align: 'right',
-    hide: 'sm',
-    render: (row) => <span className="num">{num(row.open)}</span>,
+    render: (row) => <span className="num">{compact(row.market_cap)}</span>,
   },
   {
-    key: 'high',
-    header: 'High / Low',
+    key: 'volume_30d_avg',
+    header: '30d avg vol',
+    align: 'right',
+    hide: 'sm',
+    render: (row) => <span className="num">{compact(row.volume_30d_avg)}</span>,
+  },
+  {
+    key: 'pe_ratio',
+    header: 'P/E',
     align: 'right',
     hide: 'md',
     render: (row) => (
-      <span className="num">
-        {num(row.high)}
-        <span className="pct faint">{num(row.low)}</span>
+      <span className="num">{row.pe_ratio > 0 ? num(row.pe_ratio) : DASH}</span>
+    ),
+  },
+  {
+    key: 'dividend_yield',
+    header: 'Div yield',
+    align: 'right',
+    hide: 'md',
+    render: (row) => (
+      <span className="num">{row.dividend_yield ? `${num(row.dividend_yield)}%` : DASH}</span>
+    ),
+  },
+  {
+    key: 'change_1y_pct',
+    header: '1 year',
+    align: 'right',
+    hide: 'md',
+    render: (row) => (
+      <span className={`delta delta--${direction(row.change_1y_pct)}`}>
+        {pct(row.change_1y_pct)}
       </span>
     ),
   },
   {
-    key: 'ldcp',
-    header: 'LDCP',
+    key: 'volume',
+    header: 'Session vol',
     align: 'right',
     hide: 'md',
-    render: (row) => <span className="num">{num(row.ldcp)}</span>,
+    // Only present for the instruments today's bounded quote pass covered.
+    render: (row) =>
+      row.has_quote ? (
+        <span className="num">{compact(row.volume)}</span>
+      ) : (
+        <span className="num faint" title="PSX no longer publishes session volume in bulk">
+          {DASH}
+        </span>
+      ),
   },
 ]
 
@@ -96,15 +127,16 @@ export default function Stocks({ nonce }) {
   const [query, setQuery] = useState('')
   const term = useDebounced(query)
 
-  const { sort, toggle, apply, set } = useSort('volume')
+  const { sort, toggle, apply, set } = useSort('market_cap')
 
   // Switching view re-points the sort at the column that view is about — a
-  // gainers list ordered by volume is not a gainers list.
+  // gainers list ordered by market cap is not a gainers list.
   const changeView = (next) => {
     setView(next)
     if (next === 'gainers') set({ key: 'change_pct', ascending: false })
     else if (next === 'losers') set({ key: 'change_pct', ascending: true })
-    else set({ key: 'volume', ascending: false })
+    else if (next === 'active') set({ key: 'volume_30d_avg', ascending: false })
+    else set({ key: 'market_cap', ascending: false })
   }
 
   const all = state.status === 'ready' ? state.bodies[0].data || [] : []
@@ -123,9 +155,9 @@ export default function Stocks({ nonce }) {
     const needle = term.trim().toLowerCase()
     let rows = all
 
-    if (view !== 'all') rows = rows.filter((row) => row.traded)
     if (view === 'gainers') rows = rows.filter((row) => (row.change_pct ?? 0) > 0)
     if (view === 'losers') rows = rows.filter((row) => (row.change_pct ?? 0) < 0)
+    if (view === 'quoted') rows = rows.filter((row) => row.has_quote)
     if (sector) rows = rows.filter((row) => row.sector === sector)
     if (needle) {
       rows = rows.filter(

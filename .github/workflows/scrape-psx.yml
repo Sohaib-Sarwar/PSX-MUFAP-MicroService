@@ -5,13 +5,16 @@ name: PSX — daily close
 # 168 hours in a week, so about four fetches in five returned a board that had
 # not moved. One run after the close collects exactly the same data.
 #
-#   12:10 UTC = 17:10 PKT, Monday to Friday — about half an hour after the
-#   close, and off the top of the hour, where GitHub's scheduler is busiest and
-#   queues runs the longest.
+#   12:00 UTC = 17:00 PKT, Monday to Friday — after the close.
+#
+# Every run fetches. There is no "the published date already looks current"
+# shortcut: the point of a scheduled refresh is to replace what is published
+# with what the source says now, and a guard that skips on a date comparison
+# is exactly how a stale board survives a whole day unnoticed.
 
 on:
   schedule:
-    - cron: '10 12 * * 1-5'
+    - cron: '0 12 * * 1-5'
   workflow_dispatch:
     inputs:
       force:
@@ -32,13 +35,11 @@ jobs:
       contents: write
     with:
       domain: psx
-      skip_if_current: true
       force: ${{ inputs.force == true }}
 
   publish:
     needs: scrape
-    # A skipped scrape changed nothing, so there is nothing to republish.
-    if: needs.scrape.outputs.status != 'skipped' && needs.scrape.outputs.status != 'failed'
+    if: needs.scrape.outputs.status != 'failed'
     uses: ./.github/workflows/_pages.yml
     permissions:
       contents: read

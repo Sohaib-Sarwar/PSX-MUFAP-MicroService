@@ -111,6 +111,12 @@ class Settings:
         # previous good snapshot, is rejected rather than published. This is the
         # guard that stops a parser regression from replacing 500 stocks with 3.
         self.psx_min_rows: int = _env_int("PSX_MIN_ROWS", 50)
+        # How many instruments get their full quote (OHLC, today's volume)
+        # fetched from their own page each run, largest market cap first. The
+        # bulk feed that used to carry this for everyone is gone; this is the
+        # bounded replacement. 0 disables it.
+        self.psx_detail_budget: int = _env_int("PSX_DETAIL_BUDGET", 120)
+        self.psx_detail_pause_s: float = _env_float("PSX_DETAIL_PAUSE_SECONDS", 0.12)
         self.mufap_min_rows: int = _env_int("MUFAP_MIN_ROWS", 100)
         self.max_row_drop_ratio: float = _env_float("MAX_ROW_DROP_RATIO", 0.5)
 
@@ -149,22 +155,39 @@ class Settings:
         self.mufap_base: str = os.getenv("MUFAP_BASE_URL", "https://www.mufap.com.pk").rstrip("/")
 
     # -- derived upstream URLs ------------------------------------------------
-    @property
-    def psx_market_watch_url(self) -> str:
-        return f"{self.psx_base}/market-watch"
+    # PSX withdrew its bulk quote feeds on 2026-09-24. /symbols, /market-watch
+    # and /timeseries now answer 403 with an empty body to any client that
+    # identifies as XHR, and 404 to one that does not — verified from a full
+    # browser TLS profile with a warmed session, so this is a deliberate
+    # lockdown rather than a fingerprint or a rate limit. The three pages below
+    # are what remains server-rendered, and between them they carry more per
+    # instrument than the old board did.
 
     @property
-    def psx_symbols_url(self) -> str:
-        """JSON list of every listed instrument (~1020), with name/sector/flags."""
-        return f"{self.psx_base}/symbols"
+    def psx_screener_url(self) -> str:
+        """The listed universe with price, market cap, P/E, yield and free float.
+
+        Replaces /market-watch and /symbols together: ~747 instruments with
+        their sector code, index memberships and fundamentals in one fetch.
+        """
+        return f"{self.psx_base}/screener"
+
+    @property
+    def psx_trading_panel_url(self) -> str:
+        """Session-wide totals, and the only authoritative timestamp PSX still
+        publishes: the date and time the board was last updated, plus the
+        advance/decline/unchanged counts and per-market segment states."""
+        return f"{self.psx_base}/trading-panel"
 
     @property
     def psx_indices_url(self) -> str:
         """Server-rendered index table. The homepage renders indices client-side."""
         return f"{self.psx_base}/indices"
 
-    def psx_timeseries_url(self, kind: str, symbol: str) -> str:
-        return f"{self.psx_base}/timeseries/{kind}/{symbol}"
+    def psx_company_url(self, symbol: str) -> str:
+        """One instrument's quote page — the last source of today's OHLC and
+        volume. One request per symbol, so it is fetched for a bounded set."""
+        return f"{self.psx_base}/company/{symbol.upper()}"
 
     @property
     def mufap_returns_url(self) -> str:
