@@ -66,6 +66,12 @@ async def derive_market_status() -> dict[str, Any]:
     }
 
 
+# Consecutive per-symbol failures after which the quote pass gives up for this
+# run. The snapshot publishes regardless; those rows simply report has_quote
+# false, which is what the field is for.
+_DETAIL_FAILURE_LIMIT = 5
+
+
 # ── quote enrichment ──────────────────────────────────────────────────────────
 # The screener carries price and fundamentals for every instrument but no OHLC
 # and no session volume; those survive only on each instrument's own page. One
@@ -89,6 +95,12 @@ async def _fetch_details(symbols: list[str]) -> dict[str, dict[str, Any]]:
     if not symbols:
         return out
 
+    # If PSX starts refusing this address, it refuses every symbol, and grinding
+    # through the remaining budget just to collect 120 identical failures wastes
+    # a couple of minutes and puts pointless load on a host that has already
+    # said no. A short run of consecutive failures ends the pass.
+    consecutive_failures = 0
+
     for index, symbol in enumerate(symbols):
         if index:
             await asyncio.sleep(s.psx_detail_pause_s)
@@ -96,9 +108,17 @@ async def _fetch_details(symbols: list[str]) -> dict[str, dict[str, Any]]:
             html = await fetch_text(s.psx_company_url(symbol))
             detail = parsers.parse_company(html, symbol)
         except Exception as exc:
+            consecutive_failures += 1
             logger.debug("psx_detail_failed", extra={"symbol": symbol,
                                                      "error": type(exc).__name__})
+            if consecutive_failures >= _DETAIL_FAILURE_LIMIT:
+                logger.warning("psx_detail_pass_abandoned",
+                               extra={"after": index + 1, "collected": len(out),
+                                      "reason": f"{consecutive_failures} consecutive failures"})
+                break
             continue
+
+        consecutive_failures = 0
         if detail.get("volume") is not None or detail.get("name"):
             out[symbol] = detail
 
