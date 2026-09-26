@@ -64,10 +64,18 @@ function urlFor(name) {
   return `${STATIC_BASE}${resource.static}`
 }
 
-async function request(url) {
+async function request(url, { bust = false } = {}) {
   let response
   try {
-    response = await fetch(url, { headers: { Accept: 'application/json' } })
+    // GitHub Pages serves these with `Cache-Control: max-age=600`. Emptying
+    // the in-memory map is therefore not enough to reload: without defeating
+    // the HTTP cache too, a reload one minute after a refresh is answered from
+    // disk with the pre-refresh bytes, and the button looks broken.
+    const target = bust ? `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}` : url
+    response = await fetch(target, {
+      headers: { Accept: 'application/json' },
+      cache: bust ? 'no-store' : 'default',
+    })
   } catch (cause) {
     throw new ApiError('Could not reach the data source. Check your connection.', 0)
   }
@@ -92,7 +100,7 @@ export function load(name, { fresh = false } = {}) {
   if (!fresh && cache.has(name)) return Promise.resolve(cache.get(name))
   if (inflight.has(name)) return inflight.get(name)
 
-  const promise = request(urlFor(name))
+  const promise = request(urlFor(name), { bust: fresh })
     .then((body) => {
       cache.set(name, body)
       inflight.delete(name)
@@ -109,6 +117,16 @@ export function load(name, { fresh = false } = {}) {
 
 export function loadAll(names, options) {
   return Promise.all(names.map((name) => load(name, options)))
+}
+
+/** Counts worth showing before a refresh starts ("fetching 747 instruments…"). */
+export function knownCounts() {
+  const catalog = cache.get('catalog')
+  const datasets = catalog?.datasets || {}
+  return {
+    psx: datasets['psx.stocks'] || 0,
+    mufap: datasets['mufap.funds'] || 0,
+  }
 }
 
 export function clearCache() {

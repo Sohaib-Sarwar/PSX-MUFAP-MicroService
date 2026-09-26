@@ -9,11 +9,11 @@ envelope — is the same code the HTTP service runs. Nothing is reimplemented
 here; this file only supplies the process lifecycle around it.
 
     python scripts/scrape.py --domain psx
-    python scripts/scrape.py --domain mufap --skip-if-current
+    python scripts/scrape.py --domain mufap --min-interval-minutes 45
 
 Exit codes
-    0   a snapshot was published, or the run was skipped because the published
-        one is already current, or the fetch failed but last-known-good data is
+    0   a snapshot was published, or the run was skipped because one happened
+        within the minimum interval, or the fetch failed but last-known-good is
         still being served (reported as a warning, not a failure — the site is
         serving correct, clearly-labelled data and a red run would be noise)
     1   there is no usable data for this dataset at all
@@ -51,11 +51,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="which upstream to refresh")
     parser.add_argument("--data-dir", default=os.getenv("SNAPSHOT_DIR", "data"),
                         help="directory holding one JSON snapshot per dataset")
-    parser.add_argument("--skip-if-current", action="store_true",
-                        help="exit without fetching when the published snapshot "
-                             "already covers the current session date")
+    parser.add_argument("--min-interval-minutes", type=float, default=0.0,
+                        help="skip if the last successful fetch is younger than "
+                             "this. Guards against a dense cron double-fetching, "
+                             "NOT against the data looking current — a fetch is "
+                             "always made once the interval has elapsed, whatever "
+                             "date the source reports")
     parser.add_argument("--force", action="store_true",
-                        help="fetch even when --skip-if-current would skip")
+                        help="fetch regardless of when the last one happened")
     parser.add_argument("--max-memory-mb", type=int,
                         default=int(os.getenv("MAX_MEMORY_MB", "0") or 0),
                         help="hard address-space ceiling; 0 disables it")
@@ -125,21 +128,36 @@ async def run(args: argparse.Namespace) -> int:
     datasets = {"psx": ("psx.stocks", "psx.indices"), "mufap": ("mufap.funds",)}[args.domain]
     primary = datasets[0]
 
-    # ── skip check ────────────────────────────────────────────────────────
-    if args.skip_if_current and not args.force:
+    # ── interval check ────────────────────────────────────────────────────
+    # The cron fires far more often than the data changes, deliberately: GitHub
+    # drops most scheduled fires, so asking for many is the only way to land
+    # near the intended times. This is what keeps the extra fires from turning
+    # into extra load on PSX and MUFAP.
+    if args.min_interval_minutes > 0 and not args.force:
         existing = await store.get(primary)
-        published = (existing.data_as_of or "")[:10] if existing else ""
-        if existing and existing.rows and not existing.error and published >= session_date:
-            message = (f"{args.domain}: published data is already current for "
-                       f"{session_date} ({existing.count} records) — not fetching")
-            log.info("scrape_skipped", extra={"dataset": primary, "as_of": published})
+        age_minutes = None
+        if existing and existing.rows and not existing.error:
+            age = existing.age_seconds()
+            age_minutes = age / 60 if age is not None else None
+
+        if age_minutes is not None and age_minutes < args.min_interval_minutes:
+            wait = args.min_interval_minutes - age_minutes
+            message = (f"{args.domain}: last fetch was {age_minutes:.0f}m ago, "
+                       f"minimum interval is {args.min_interval_minutes:.0f}m — "
+                       f"next fetch due in {wait:.0f}m")
+            log.info("scrape_not_due", extra={"dataset": primary,
+                                              "age_minutes": round(age_minutes)})
             annotate("notice", message)
-            write_summary([f"### ⏭️ {args.domain.upper()} skipped",
-                           "", f"Published snapshot already covers `{session_date}`.",
-                           f"Records: **{existing.count:,}** · Upstream requests: **0**", ""])
-            set_output(status="skipped", records=existing.count, as_of=published)
+            write_summary([f"### ⏱️ {args.domain.upper()} not due yet", "",
+                           f"Last fetched **{age_minutes:.0f} minutes** ago; the minimum "
+                           f"interval is **{args.min_interval_minutes:.0f} minutes**.",
+                           f"Records held: **{existing.count:,}** · Upstream requests: **0**",
+                           ""])
+            set_output(status="skipped", records=existing.count,
+                       as_of=existing.data_as_of or "")
             print(json.dumps({"domain": args.domain, "status": "skipped",
-                              "records": existing.count, "as_of": published}))
+                              "reason": "not due", "age_minutes": round(age_minutes),
+                              "records": existing.count}))
             return 0
 
     # ── refresh ───────────────────────────────────────────────────────────

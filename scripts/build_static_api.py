@@ -40,21 +40,25 @@ UTC = timezone.utc
 # a second time.
 SCHEDULES: dict[str, dict[str, Any]] = {
     "psx": {
+        # The times the service targets. The repository cron asks for more
+        # fires than this because GitHub honours only some of them; the
+        # punctual path is an external scheduler calling repository_dispatch.
         "cron": "0 12 * * 1-5",
+        "backstop_cron": "0 12-17 * * 1-5",
         "weekdays": [0, 1, 2, 3, 4],        # Mon-Fri, UTC (JSON-serialisable)
         "hours": [12],
         "minute": 0,
-        "human": "Once per working day at 17:00 PKT, after the PSX close. "
-                 "Every run fetches and replaces; nothing is skipped.",
+        "human": "Once per working day at 17:00 PKT, after the PSX close.",
         "grace_minutes": 180,
     },
     "mufap": {
         "cron": "0 13-19 * * 1-5",
+        "backstop_cron": "0,30 13-19 * * 1-5",
         "weekdays": [0, 1, 2, 3, 4],        # Mon-Fri, UTC (JSON-serialisable)
         "hours": list(range(13, 20)),       # 18:00 -> 00:00 PKT
         "minute": 0,
         "human": "Hourly on working evenings at 18:00, 19:00, 20:00, 21:00, "
-                 "22:00, 23:00 and 00:00 PKT. Every run fetches and replaces.",
+                 "22:00, 23:00 and 00:00 PKT.",
         "grace_minutes": 90,
     },
 }
@@ -159,10 +163,16 @@ class Dataset:
         else:
             state = "fresh"
 
+        # Published rather than left to be derived: a consumer alarming on
+        # lateness should not have to reimplement the schedule to do it.
+        overdue_by = max(0.0, (self.now - deadline).total_seconds()) if fetched else None
+
         envelope: dict[str, Any] = {
             "state": state,
             "data_as_of": self.data_as_of,
             "fetched_at": self.fetched_at,
+            "overdue_seconds": round(overdue_by) if overdue_by is not None else None,
+            "on_schedule": (overdue_by == 0.0) if overdue_by is not None else None,
             "published_at": self.now.astimezone(PKT).isoformat(timespec="seconds"),
             # Measured at publish time. A static file cannot tick, so recompute
             # from `fetched_at` if you need the age right now.
@@ -710,7 +720,7 @@ SCHEMAS: dict[str, dict[str, str]] = {
     "trustee": {"trustee": "Trustee institution.", "count": "Funds it holds."},
     "poll": {
         "published_at": "When this file was written.",
-        "datasets": "One entry per dataset, each carrying `state`, `fetched_at`, `data_as_of`, `stale_after_seconds`, `next_refresh_at` and `record_count`.",
+        "datasets": "One entry per dataset, each carrying `state`, `fetched_at`, `data_as_of`, `stale_after_seconds`, `next_refresh_at`, `record_count`, `overdue_seconds` and `on_schedule`.",
     },
     "index": {
         "index_name": "Index name, e.g. `KSE100`.",
@@ -798,6 +808,8 @@ FRESHNESS_FIELDS = {
     "age_seconds": "Age at publish time. A static file cannot tick — recompute from `fetched_at` for the age right now.",
     "stale_after_seconds": "Age, measured from `fetched_at`, past which the data should be treated as stale. Derived from the schedule, so it already accounts for weekends.",
     "next_refresh_at": "When the next scheduled run is due, in PKT.",
+    "overdue_seconds": "How far past its deadline this dataset is; 0 when on schedule. Alarm on this.",
+    "on_schedule": "`false` once `overdue_seconds` is above zero — the refresh that should have happened has not.",
     "record_count": "Rows in the underlying snapshot.",
     "error": "Present only when the last refresh failed. The data shown is the previous good snapshot.",
 }
@@ -857,7 +869,8 @@ def main() -> int:
     # hundreds of kilobytes; this is under a kilobyte and answers the only
     # question a poller has: is there anything new, and how old is what I hold.
     POLL_FIELDS = ("state", "fetched_at", "data_as_of", "stale_after_seconds",
-                   "next_refresh_at", "record_count")
+                   "next_refresh_at", "record_count", "overdue_seconds",
+                   "on_schedule")
     poll_datasets: dict[str, Any] = {}
     for domain, states in (("psx", psx_state), ("mufap", mufap_state)):
         for name, state in states.items():

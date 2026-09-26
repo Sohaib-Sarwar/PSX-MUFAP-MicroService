@@ -1,43 +1,43 @@
 name: MUFAP — evening NAV
 
 # MUFAP strikes NAV once per business day and publishes it some time during the
-# evening. The hour it lands varies, so the window is swept hourly:
+# evening, so the window 18:00–00:00 PKT (13:00–19:00 UTC) is swept hourly.
 #
-#   13:00–19:00 UTC = 18:00, 19:00, 20:00, 21:00, 22:00, 23:00, 00:00 PKT,
-#   Monday to Friday.
+# The cron asks every 30 minutes — fourteen fires for seven wanted fetches —
+# because GitHub delivers only one or two of seven hourly requests on this
+# repository. `min_interval_minutes: 45` means a fetch happens at most once
+# roughly per hour however many fires arrive, and every other fire exits in
+# seconds without touching mufap.com.pk.
 #
-# Every run fetches and republishes. An earlier version skipped once the
-# published validity date looked current, which saved requests but meant a
-# correction issued at 22:00 to a NAV struck at 18:00 would never be collected.
-# Seven fetches an evening is a small price for the published figure always
-# being the one MUFAP is serving right now.
+# For punctuality, drive repository_dispatch from an external scheduler.
+# See docs/DEPLOYMENT.md.
 
 on:
   schedule:
-    - cron: '0 13-19 * * 1-5'
+    - cron: '0,30 13-19 * * 1-5'
   workflow_dispatch:
     inputs:
       force:
-        description: Fetch even if the published snapshot is already current.
+        description: Fetch even if one happened within the last 45 minutes.
         type: boolean
-        default: false
-
-concurrency:
-  group: market-data
-  cancel-in-progress: false
+        default: true
 
 jobs:
   scrape:
     uses: ./.github/workflows/_scrape.yml
     permissions:
       contents: write
+    concurrency:
+      group: scrape-mufap
+      cancel-in-progress: false
     with:
       domain: mufap
+      min_interval_minutes: 45
       force: ${{ inputs.force == true }}
 
   publish:
     needs: scrape
-    if: needs.scrape.outputs.status != 'failed'
+    if: needs.scrape.outputs.status == 'ok' || needs.scrape.outputs.status == 'degraded'
     uses: ./.github/workflows/_pages.yml
     permissions:
       contents: read

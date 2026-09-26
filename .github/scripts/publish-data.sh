@@ -46,11 +46,55 @@ if [ "$have_remote" = 1 ] && git diff --quiet --cached FETCH_HEAD -- data; then
   exit 0
 fi
 
-git checkout --quiet --orphan "$BRANCH"
-git reset --quiet
-git add --force data
-git commit --quiet --message "data: ${OWNED_PREFIX%.} snapshot $(date -u +'%Y-%m-%dT%H:%MZ')"
-git push --force origin "HEAD:refs/heads/$BRANCH"
+# Both domains now run in their own concurrency group, so a PSX publish and a
+# MUFAP publish can genuinely overlap. A force-push would let the loser silently
+# erase the winner, so the merge-and-push is retried: on each attempt the other
+# domain's files are re-taken from whatever is on the branch right now, and the
+# push is rejected outright if the branch moved after that read.
+attempt=1
+max_attempts=5
+
+while :; do
+  git checkout --quiet --orphan "$BRANCH-work-$attempt"
+  git reset --quiet
+  git add --force data
+  git commit --quiet     --message "data: ${OWNED_PREFIX%.} snapshot $(date -u +'%Y-%m-%dT%H:%MZ')"
+
+  # --force-with-lease, not --force: it refuses if the remote advanced since
+  # our fetch, which is exactly the case where force would destroy the other
+  # domain's work.
+  expected=""
+  if [ "$have_remote" = 1 ]; then
+    expected="--force-with-lease=refs/heads/$BRANCH:$(git rev-parse FETCH_HEAD)"
+  else
+    expected="--force-with-lease=refs/heads/$BRANCH:"
+  fi
+
+  if git push $expected origin "HEAD:refs/heads/$BRANCH" 2>&1; then
+    break
+  fi
+
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    echo "::error::could not publish to '$BRANCH' after $max_attempts attempts"
+    exit 1
+  fi
+
+  echo "branch moved under us — remerging (attempt $((attempt + 1)))"
+  sleep $(( attempt * 3 ))
+  attempt=$(( attempt + 1 ))
+
+  # Re-read the branch and re-take everything this run does not own.
+  if git fetch --no-tags --depth=1 origin "$BRANCH"; then
+    have_remote=1
+    while read -r tracked; do
+      [ -n "$tracked" ] || continue
+      case "${tracked#data/}" in
+        "$OWNED_PREFIX"*) ;;
+        *) git checkout FETCH_HEAD -- "$tracked" ;;
+      esac
+    done < <(git ls-tree -r --name-only FETCH_HEAD -- data)
+  fi
+done
 
 echo "published to '$BRANCH':"
 git ls-tree -r --name-only HEAD -- data | sed 's/^/  /'

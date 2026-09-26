@@ -1,0 +1,132 @@
+name: Refresh on demand
+
+# The punctual path, and the public API's write endpoint.
+#
+# GitHub's `schedule` is best effort and on this repository arrives hours late
+# with most fires dropped entirely. `repository_dispatch` is not: it starts a
+# run within seconds of the POST. So anything that actually has to happen at a
+# particular time — an external scheduler, an operator, or the dashboard's
+# refresh button — comes through here.
+#
+#   curl -X POST \
+#     -H "Accept: application/vnd.github+json" \
+#     -H "Authorization: Bearer $GITHUB_TOKEN" \
+#     https://api.github.com/repos/OWNER/REPO/dispatches \
+#     -d '{"event_type":"refresh","client_payload":{"domain":"mufap"}}'
+#
+# `domain` is psx, mufap or both. A dispatch always fetches: it exists because
+# somebody wants the number now, so the minimum-interval guard that protects
+# the dense cron does not apply.
+
+on:
+  repository_dispatch:
+    types: [refresh, refresh-psx, refresh-mufap]
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: Which upstream to refresh now
+        type: choice
+        options: [both, psx, mufap]
+        default: both
+
+jobs:
+  # A dispatch carries its target in the payload; a manual run carries it in an
+  # input; the shorthand event types carry it in their name. All three are
+  # resolved once, here, so the jobs below have one thing to read.
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      psx: ${{ steps.resolve.outputs.psx }}
+      mufap: ${{ steps.resolve.outputs.mufap }}
+    steps:
+      - name: Resolve the requested domains
+        id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          PAYLOAD_DOMAIN: ${{ github.event.client_payload.domain }}
+          INPUT_DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            domain="${INPUT_DOMAIN:-both}"
+          elif [ "$ACTION" = "refresh-psx" ]; then
+            domain="psx"
+          elif [ "$ACTION" = "refresh-mufap" ]; then
+            domain="mufap"
+          else
+            domain="${PAYLOAD_DOMAIN:-both}"
+          fi
+
+          case "$domain" in
+            psx|mufap|both) ;;
+            *)
+              echo "::error::Unknown domain '$domain'. Use psx, mufap or both."
+              exit 1
+              ;;
+          esac
+
+          # Explicit ifs, not `[ a ] || [ b ] && x`: when both tests fail that
+          # compound returns 1, and under `set -e` the step exits there having
+          # resolved nothing.
+          psx=false
+          mufap=false
+          if [ "$domain" = "psx" ] || [ "$domain" = "both" ]; then psx=true; fi
+          if [ "$domain" = "mufap" ] || [ "$domain" = "both" ]; then mufap=true; fi
+
+          echo "psx=$psx" >> "$GITHUB_OUTPUT"
+          echo "mufap=$mufap" >> "$GITHUB_OUTPUT"
+          echo "### ⚡ On-demand refresh" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Requested: **$domain** (via \`$EVENT\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "resolved domain=$domain psx=$psx mufap=$mufap"
+
+  psx:
+    name: PSX
+    needs: plan
+    if: needs.plan.outputs.psx == 'true'
+    uses: ./.github/workflows/_scrape.yml
+    permissions:
+      contents: write
+    # The domain's own group, shared with its scheduled workflow, so an
+    # on-demand refresh and a cron fire cannot write the data branch at once.
+    concurrency:
+      group: scrape-psx
+      cancel-in-progress: false
+    with:
+      domain: psx
+      force: true
+
+  mufap:
+    name: MUFAP
+    needs: plan
+    if: needs.plan.outputs.mufap == 'true'
+    uses: ./.github/workflows/_scrape.yml
+    permissions:
+      contents: write
+    concurrency:
+      group: scrape-mufap
+      cancel-in-progress: false
+    with:
+      domain: mufap
+      force: true
+
+  publish:
+    name: Publish
+    needs: [psx, mufap]
+    # `always()` because one domain may have been skipped by `if` rather than
+    # having failed, and a skipped need would otherwise skip this too. The site
+    # is republished whenever either domain produced data.
+    if: >-
+      always() &&
+      (needs.psx.outputs.status == 'ok' || needs.psx.outputs.status == 'degraded' ||
+       needs.mufap.outputs.status == 'ok' || needs.mufap.outputs.status == 'degraded')
+    uses: ./.github/workflows/_pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      reason: on-demand refresh

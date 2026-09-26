@@ -1,11 +1,30 @@
 name: Scrape (reusable)
 
 # The scheduled half of the microservice. A run is a whole service lifecycle
-# compressed into a few seconds: start, fetch one upstream, validate, publish a
+# compressed into a minute: start, fetch one upstream, validate, publish a
 # snapshot, exit. The pipeline it drives is the same code the HTTP deployment
 # runs — see scripts/scrape.py.
 #
-# Called by scrape-psx.yml and scrape-mufap.yml, which own the schedules.
+# ── Why the cron is dense and the job exits early ────────────────────────────
+# GitHub's `schedule` event is best effort, and on this repository it is a long
+# way from punctual. Measured over five consecutive working days:
+#
+#     PSX    asked for 12:00 UTC   fired 16:17, 17:03, 16:49, 16:50, 18:11
+#                                  — four to six hours late, every day
+#     MUFAP  asked for 7 fires     got 1–2 a day; the rest were never created
+#
+# Nothing was cancelled and nothing failed: GitHub drops and delays scheduled
+# runs, and that cannot be fixed from inside the repository. So the architecture
+# stops depending on it being on time:
+#
+#   1. An external trigger calls repository_dispatch, which fires within
+#      seconds. That is the punctual path — see docs/DEPLOYMENT.md.
+#   2. The cron asks for far more fires than are needed, so whatever fraction
+#      GitHub honours still lands near the intended times.
+#   3. Every run first checks how long ago a fetch actually succeeded and exits
+#      in seconds if one is not due — before installing anything. Asking for
+#      fourteen fires therefore costs fourteen short jobs, not fourteen scrapes
+#      of someone else's website.
 
 on:
   workflow_call:
@@ -14,8 +33,15 @@ on:
         description: psx or mufap
         required: true
         type: string
+      min_interval_minutes:
+        description: >-
+          Skip if the last successful fetch is younger than this. It guards a
+          dense cron against double-fetching; it is not a check on whether the
+          data looks current.
+        type: number
+        default: 0
       force:
-        description: Reserved. Every scheduled run already fetches unconditionally.
+        description: Fetch regardless of when the last one happened.
         type: boolean
         default: false
     outputs:
@@ -47,14 +73,16 @@ jobs:
   scrape:
     name: ${{ inputs.domain }}
     runs-on: ubuntu-latest
-    # Generous next to a normal run (~30s) and still a hard stop, so a hung
+    # Generous next to a normal run (~90s) and still a hard stop, so a hung
     # upstream cannot hold a runner for six hours.
-    timeout-minutes: 10
+    timeout-minutes: 12
     permissions:
       contents: write
     outputs:
-      status: ${{ steps.refresh.outputs.status }}
-      records: ${{ steps.refresh.outputs.records }}
+      # `skipped` comes from the due check, which runs before the refresh step
+      # exists to report anything.
+      status: ${{ steps.refresh.outputs.status || steps.due.outputs.status }}
+      records: ${{ steps.refresh.outputs.records || steps.due.outputs.records }}
 
     steps:
       - name: Check out the service
@@ -74,7 +102,21 @@ jobs:
             echo "no '$DATA_BRANCH' branch yet — this run starts cold"
           fi
 
+      - name: Is a fetch due?
+        id: due
+        # Deliberately before setup-python and pip, because most fires are not
+        # due and a fire that is not due must cost seconds rather than a minute.
+        # Uses only the runner's preinstalled python and the snapshot just
+        # restored — no network, no install.
+        run: |
+          python3 .github/scripts/fetch_due.py \
+            --domain '${{ inputs.domain }}' \
+            --data-dir data \
+            --min-interval-minutes '${{ inputs.min_interval_minutes }}' \
+            --force '${{ inputs.force }}'
+
       - name: Set up Python
+        if: steps.due.outputs.due == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -82,6 +124,7 @@ jobs:
           cache-dependency-path: requirements-scrape.txt
 
       - name: Install dependencies
+        if: steps.due.outputs.due == 'true'
         # requirements-scrape.txt is the fetch-and-parse subset: no web
         # framework, no server. Five packages instead of nine, which is both a
         # faster install and a smaller resident footprint for the job.
@@ -91,6 +134,7 @@ jobs:
 
       - name: Refresh ${{ inputs.domain }}
         id: refresh
+        if: steps.due.outputs.due == 'true'
         env:
           LOG_FORMAT: text
           # Identifies the client to the upstreams, with somewhere to complain
@@ -100,17 +144,14 @@ jobs:
             Mozilla/5.0 (compatible; PK-Finance-Service/6.0;
             +https://github.com/${{ github.repository }})
         run: |
-          # Flags are assembled rather than interpolated straight into the
-          # command: an expression that renders empty would otherwise leave
-          # a bare line-continuation in the middle of it.
-          flags=""
-          if [ "${{ inputs.force }}" = "true" ]; then flags="$flags --force"; fi
-
+          # --force unconditionally: the due check above has already decided,
+          # and deciding the same thing twice in two places is how the two come
+          # to disagree.
           python scripts/scrape.py \
             --domain '${{ inputs.domain }}' \
             --data-dir data \
             --max-memory-mb "$MAX_MEMORY_MB" \
-            $flags
+            --force
 
       - name: Publish the snapshot
         if: steps.refresh.outputs.status == 'ok' || steps.refresh.outputs.status == 'degraded'

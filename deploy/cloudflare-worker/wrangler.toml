@@ -1,0 +1,17 @@
+name = "pk-finance-cron"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# UTC, and deliberately the exact times the README promises. Cloudflare fires
+# these within seconds; GitHub's own scheduler, asked for the same times, has
+# been delivering the 12:00 run between 16:17 and 18:11 and dropping five of
+# the seven evening runs. That gap is the entire reason this worker exists.
+[triggers]
+crons = [
+  "0 12 * * 1-5",     # 17:00 PKT — PSX, after the close
+  "0 13-19 * * 1-5",  # 18:00 → 00:00 PKT hourly — MUFAP
+]
+
+# Secrets are set with `npx wrangler secret put NAME`, never in this file:
+#   GITHUB_TOKEN    fine-grained PAT, Contents: Read and write, this repo only
+#   TRIGGER_SECRET  shared secret guarding the manual GET route

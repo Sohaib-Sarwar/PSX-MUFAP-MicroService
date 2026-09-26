@@ -32,13 +32,14 @@ export function useRoute(fallback = 'overview') {
 
 export function useTheme() {
   const [theme, setTheme] = useState(
-    () => document.documentElement.dataset.theme || 'light'
+    () => document.documentElement.dataset.theme || 'dark'
   )
 
   const toggle = useCallback(() => {
     setTheme((current) => {
       const next = current === 'dark' ? 'light' : 'dark'
       document.documentElement.dataset.theme = next
+      document.documentElement.style.background = next === 'dark' ? '#000' : '#fff'
       try {
         localStorage.setItem('pkf.theme', next)
       } catch {
@@ -61,15 +62,19 @@ export function useData(names, nonce = 0) {
   const key = names.join(',')
   const [state, setState] = useState({ status: 'loading' })
   const latest = useRef(0)
+  const lastNonce = useRef(0)
 
   useEffect(() => {
     const ticket = ++latest.current
     setState({ status: 'loading' })
 
-    // `nonce` changes after the refresh button has emptied the cache, so a
-    // plain load here already re-fetches; asking for `fresh` as well would
-    // bypass the cache on every navigation.
-    loadAll(key.split(','))
+    // `fresh` only when the nonce moved — that is a reload, and it has to
+    // defeat the HTTP cache as well as the in-memory one. A plain navigation
+    // keeps both, which is what makes switching pages instant.
+    loadAll(key.split(','), { fresh: nonce > lastNonce.current })
+      .finally(() => {
+        lastNonce.current = nonce
+      })
       .then((bodies) => {
         if (latest.current === ticket) setState({ status: 'ready', bodies })
       })

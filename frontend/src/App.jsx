@@ -10,10 +10,12 @@ import {
   FiMoon,
   FiRefreshCw,
   FiSun,
+  FiZap,
   FiTrendingUp,
   FiX,
 } from 'react-icons/fi'
-import { clearCache, load, REPO_URL } from './lib/client'
+import { clearCache, knownCounts, load, REPO_URL } from './lib/client'
+import RefreshPanel from './components/RefreshPanel'
 import { useRoute, useTheme } from './lib/hooks'
 import { int } from './lib/format'
 import Overview from './pages/Overview'
@@ -47,6 +49,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [meta, setMeta] = useState(null)
   const [market, setMarket] = useState(null)
+  const [refreshOpen, setRefreshOpen] = useState(false)
 
   const page = PAGES[route] || PAGES.overview
   const Page = page.component
@@ -73,7 +76,10 @@ export default function App() {
     document.title = `${page.title} · PK Finance`
   }, [page.title])
 
-  const refresh = useCallback(() => {
+  // Reload = re-read what is published. Refresh = go and scrape it again.
+  // They are different actions and used to be conflated in one button, which
+  // is why the button appeared to do nothing on a CDN with a ten-minute cache.
+  const reload = useCallback(() => {
     clearCache()
     setNonce((value) => value + 1)
   }, [])
@@ -160,9 +166,19 @@ export default function App() {
               {theme === 'dark' ? <FiSun /> : <FiMoon />}
             </button>
 
-            <button type="button" className="btn btn--primary" onClick={refresh}>
+            <button type="button" className="btn" onClick={reload} title="Re-read the published data">
               <FiRefreshCw aria-hidden="true" />
               <span className="hide-sm">Reload</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setRefreshOpen(true)}
+              title="Scrape the sources again, now"
+            >
+              <FiZap aria-hidden="true" />
+              <span className="hide-sm">Refresh now</span>
             </button>
           </div>
         </header>
@@ -171,6 +187,13 @@ export default function App() {
           <Page nonce={nonce} onNavigate={go} />
         </main>
       </div>
+
+      <RefreshPanel
+        open={refreshOpen}
+        onClose={() => setRefreshOpen(false)}
+        counts={knownCounts()}
+        onDone={reload}
+      />
     </div>
   )
 }

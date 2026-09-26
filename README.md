@@ -18,7 +18,7 @@ Sibling branches: [`pk-micro-service`](../../tree/pk-micro-service) (PSX only) �
 
 - [Overview](#overview) · [Architecture](#architecture) · [Project structure](#project-structure)
 - [Quick start](#quick-start) · [Configuration](#configuration) · [Docker](#docker)
-- [**Public API** — live, no key](#public-api--live-now-no-key-required) · [Self-hosted API reference](#api-reference--self-hosted-service) · [Freshness contract](#freshness-contract)
+- [**Scheduling & reliability**](#scheduling-and-reliability) · [**Public API** — live, no key](#public-api--live-now-no-key-required) · [Self-hosted API reference](#api-reference--self-hosted-service) · [Freshness contract](#freshness-contract)
 - [Live-data strategy](#live-data-strategy) · [Caching](#caching) · [Error handling](#error-handling)
 - [Testing](#testing) · [Health checks](#health-checks) · [Monitoring](#monitoring)
 - [Deploy to GitHub Pages](#deploy-to-github-pages) · [Deploy to Vercel](#deploy-to-vercel) · [Deploy with Docker](#deploy-with-docker)
@@ -269,6 +269,140 @@ cd frontend && npm install && npm run build && cd ..
 cp -r frontend/dist/* static/
 docker compose up -d --build
 ```
+
+---
+
+## Scheduling and reliability
+
+> **The short version.** GitHub's `schedule` event is best effort and will not
+> hold a timetable. This service therefore treats it as a backstop and takes its
+> punctuality from an external trigger. If you only read one section before
+> depending on this API, read this one.
+
+### What GitHub actually delivers
+
+Measured on this repository over five consecutive working days, against crons
+asking for 12:00 UTC (PSX) and seven hourly fires 13:00–19:00 UTC (MUFAP):
+
+| Workflow | Asked for | GitHub delivered |
+|---|---|---|
+| PSX | 12:00 UTC | 16:17, 17:03, 16:49, 16:50, 18:11 — **4–6 hours late, every day** |
+| MUFAP | 7 fires/day | **1–2 a day**; the other five were never created |
+
+Nothing failed. Nothing was cancelled. The runs simply did not happen. This is
+[documented GitHub behaviour](https://docs.github.com/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#schedule)
+— scheduled runs are delayed or dropped under load — and it cannot be fixed
+from inside the repository.
+
+### The architecture that works anyway
+
+```
+  ┌──────────────────────┐   fires within seconds
+  │  external scheduler  │───────────────┐          ← the punctual path
+  │  (Cloudflare cron)   │               │
+  └──────────────────────┘               ▼
+                             POST /repos/…/dispatches
+  ┌──────────────────────┐               │          ← the manual path
+  │  dashboard / curl    │───────────────┤
+  └──────────────────────┘               ▼
+                                  Refresh on demand ──┐
+  ┌──────────────────────┐                            │
+  │  GitHub cron         │──→ dense fires ──→ due? ───┤   ← the backstop
+  │  (best effort)       │        │           no→exit │
+  └──────────────────────┘        └── yes ────────────┤
+                                                      ▼
+                                        scrape → validate → gate
+                                                      │
+                                     service-data (one orphan commit)
+                                                      │
+                                     static API + dashboard on Pages
+```
+
+**1. External trigger — the punctual path.** `repository_dispatch` starts a run
+within seconds of the POST. A Cloudflare Worker on cron triggers calls it at the
+real times. Ships in [`deploy/cloudflare-worker/`](deploy/cloudflare-worker/):
+free tier, twelve invocations a working day, one outbound request each.
+
+**2. Dense cron — the backstop.** The repository asks for far more fires than
+the data needs, so that whatever fraction GitHub honours still lands near the
+intended times.
+
+| | Target | Cron asks for | Minimum interval |
+|---|---|---|---|
+| PSX | 17:00 PKT, working days | `0 12-17 * * 1-5` (6 fires) | 600 min |
+| MUFAP | 18:00–00:00 PKT hourly, working days | `0,30 13-19 * * 1-5` (14 fires) | 45 min |
+
+**3. Cheap refusal.** Every run checks how long ago a fetch actually succeeded
+*before* installing anything, using the runner's preinstalled Python and the
+snapshot it just checked out. A fire that is not due exits in seconds. Fourteen
+fires therefore cost fourteen short jobs — not fourteen scrapes of someone
+else's website.
+
+That check keys off **when we last fetched**, never off whether the data *looks*
+current. Those are different questions, and the difference matters: a MUFAP
+correction issued at 22:00 to a NAV struck at 18:00 leaves the data looking
+perfectly current while being wrong. A dispatch bypasses the check entirely.
+
+**4. No cross-blocking.** PSX and MUFAP hold separate concurrency groups, so a
+slow run in one can never queue behind or cancel the other. Because they can now
+genuinely overlap, `publish-data.sh` pushes with `--force-with-lease` and retries:
+on rejection it re-reads the branch, re-takes the other domain's files and pushes
+again. Verified against a simulated race — both domains survive, and the branch
+stays at exactly one commit.
+
+**5. Lateness is published, not hidden.** Every freshness block carries
+`overdue_seconds` and `on_schedule`. Alarm on those rather than reimplementing
+the schedule:
+
+```bash
+curl -s https://sohaib-sarwar.github.io/PSX-MUFAP-MicroService/api/freshness.json \
+  | jq '.datasets | to_entries[] | select(.value.on_schedule == false)'
+```
+
+It is weekend-aware: a Friday snapshot read on Sunday is on schedule, because
+the next run genuinely is not due until Monday.
+
+### Refresh on demand
+
+The same endpoint the dashboard's **Refresh now** button uses.
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://api.github.com/repos/Sohaib-Sarwar/PSX-MUFAP-MicroService/dispatches \
+  -d '{"event_type":"refresh","client_payload":{"domain":"mufap"}}'
+```
+
+`domain` is `psx`, `mufap` or `both`. A `204` means accepted; the run appears in
+**Actions → Refresh on demand** within seconds. Event types `refresh-psx` and
+`refresh-mufap` are shorthands that need no payload.
+
+The token is a **fine-grained PAT** scoped to this repository with one
+permission — *Contents: Read and write*, the least GitHub accepts for
+`repository_dispatch`.
+
+A dispatch always fetches and always replaces: it exists because somebody wants
+the figure now, so the interval guard that protects the dense cron does not
+apply to it.
+
+**Watching a refresh needs no token.** The repository is public, so run status
+and job steps are readable anonymously — which is how the dashboard shows the
+real run rather than a timer pretending to be one:
+
+```bash
+gh api "repos/Sohaib-Sarwar/PSX-MUFAP-MicroService/actions/runs?event=repository_dispatch&per_page=1"
+```
+
+Poll [`freshness.json`](https://sohaib-sarwar.github.io/PSX-MUFAP-MicroService/api/freshness.json)
+until `fetched_at` moves; that, not the run turning green, is when the CDN is
+serving the new bytes.
+
+### Storage
+
+`service-data` is rewritten as a **single orphan commit** every run, so the
+branch costs what the current snapshot costs — about 670 KB — however many times
+a day it is replaced. Refreshing more often does not make the repository grow.
 
 ---
 
