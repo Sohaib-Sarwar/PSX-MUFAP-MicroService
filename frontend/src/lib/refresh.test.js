@@ -115,7 +115,7 @@ describe('repository configuration', () => {
 describe('dispatchRefresh', () => {
   it('asks the refresh API, not GitHub', async () => {
     const calls = stubServer()
-    await dispatchRefresh('mufap', 'key', undefined)
+    await dispatchRefresh('mufap', undefined)
 
     expect(calls.dispatch).toHaveLength(1)
     expect(calls.dispatch[0].body.domain).toBe('mufap')
@@ -128,24 +128,30 @@ describe('dispatchRefresh', () => {
 
   it.each(['psx', 'mufap', 'both'])('accepts the %s domain', async (domain) => {
     const calls = stubServer()
-    await dispatchRefresh(domain, 'key')
+    await dispatchRefresh(domain)
     expect(calls.dispatch[0].body.domain).toBe(domain)
   })
 
-  it('explains a rejected key in plain words', async () => {
-    stubServer({ dispatchStatus: 401 })
-    await expect(dispatchRefresh('psx', 'bad')).rejects.toThrow(/was not accepted/)
-  })
-
-  it('turns a throttle into a wait the user can act on', async () => {
+  it('frames a throttle as "already up to date", not as a failure', async () => {
+    // A 429 here means the source has published nothing new. Telling the user
+    // they did something wrong would be inaccurate and unhelpful.
     stubServer({ dispatchStatus: 429 })
-    await expect(dispatchRefresh('mufap', 'key')).rejects.toThrow(/Try again in about 10 minutes/)
+    await expect(dispatchRefresh('mufap')).rejects.toThrow(/Already up to date/)
   })
 
-  it('sends the refresh key as a bearer credential', async () => {
+  it('sends no credential of any kind', async () => {
+    // The guard on the whole design: a static site cannot keep a secret, so
+    // the browser must not carry one. If an Authorization header appears here
+    // again, something privileged has been shipped to every visitor.
     const calls = stubServer()
-    await dispatchRefresh('psx', 'key-123')
-    expect(calls.dispatch[0].headers.Authorization).toBe('Bearer key-123')
+    await dispatchRefresh('psx')
+    const sent = calls.dispatch[0].headers || {}
+    expect(Object.keys(sent).map((h) => h.toLowerCase())).not.toContain('authorization')
+
+    for (const [, init] of global.fetch.mock.calls) {
+      const headers = init?.headers || {}
+      expect(Object.keys(headers).map((h) => h.toLowerCase())).not.toContain('authorization')
+    }
   })
 })
 
@@ -156,7 +162,6 @@ describe('runRefresh', () => {
 
     const result = await runRefresh({
       domain: 'psx',
-      token: 'tok',
       before: OLD,
       timings: FAST,
       onProgress: ({ stage }) => stages.push(stage),
@@ -179,7 +184,6 @@ describe('runRefresh', () => {
     const stages = []
     await runRefresh({
       domain: 'psx',
-      token: 'tok',
       before: OLD,
       timings: FAST,
       onProgress: ({ stage }) => stages.push(stage),
@@ -194,7 +198,7 @@ describe('runRefresh', () => {
   it('surfaces a failed run instead of waiting forever', async () => {
     stubServer({ runStates: ['completed'], conclusion: 'failure' })
     await expect(
-      runRefresh({ domain: 'psx', token: 'tok', before: OLD, timings: FAST })
+      runRefresh({ domain: 'psx', before: OLD, timings: FAST })
     ).rejects.toThrow(/finished as "failure"/)
   })
 
@@ -207,7 +211,6 @@ describe('runRefresh', () => {
     const seen = []
     await runRefresh({
       domain: 'psx',
-      token: 'tok',
       before: OLD,
       timings: FAST,
       onProgress: (progress) => seen.push(progress),
@@ -226,7 +229,6 @@ describe('cancellation', () => {
 
     const promise = runRefresh({
       domain: 'psx',
-      token: 'tok',
       before: OLD,
       signal: controller.signal,
       timings: FAST,

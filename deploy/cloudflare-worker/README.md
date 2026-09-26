@@ -24,7 +24,7 @@ step and nothing interactive except the Cloudflare login itself.
 cd deploy/cloudflare-worker
 npm install
 npm run login       # opens your browser once, to authorise Cloudflare
-npm run secrets     # prompts for GITHUB_TOKEN, then TRIGGER_SECRET
+npm run secrets     # prompts for GITHUB_TOKEN — the only secret
 npm run deploy
 ```
 
@@ -67,103 +67,63 @@ curl.exe "https://pk-finance-cron.<your-subdomain>.workers.dev/?key=YOUR_TRIGGER
 
 Then watch **Actions → Refresh on demand** in the repository.
 
-## Where credentials live, and why
+## The one credential
 
-One rule: **the GitHub token never leaves the worker.**
+`GITHUB_TOKEN` — a fine-grained PAT scoped to this repository with a single
+permission, *Contents: Read and write*, the least GitHub accepts for
+`repository_dispatch`. It lives as a Cloudflare secret, is never sent anywhere
+but `api.github.com`, never appears in a response body, and is never logged.
 
-Triggering a workflow needs a credential that can write to the repository.
-Handing that to every caller — a browser, an external service — hands every
-caller the ability to rewrite the repository, to do a job whose entire scope is
-"scrape now". So callers present a **refresh key** instead: a credential whose
-only capability is asking for a scrape, issued per consumer, revocable one at a
-time. A leaked refresh key costs an unnecessary scrape. A leaked GitHub PAT is
-an incident.
+`wrangler secret put` is prompt-only for exactly this reason: the value is not
+echoed and never touches disk. Never put it in this repository, in a committed
+`.env`, in a frontend build, or in a chat window.
 
-| Credential | Lives in | Who holds it | If it leaks |
-|---|---|---|---|
-| `GITHUB_TOKEN` | Cloudflare secret | nobody — the worker only | Repository write. Revoke at GitHub immediately. |
-| Refresh key | Cloudflare secret (`API_KEYS`), and the consumer's own config | each consumer | One extra scrape, rate-limited. Delete that one key. |
+Rotate it by generating a new PAT and running `npm run secrets` again.
 
-Never put either in the repository, in a `.env` that is committed, in a chat
-window, or in a frontend build. `wrangler secret put` is prompt-only for this
-reason — the value is not echoed and not stored on disk.
-
-### Issuing keys
-
-`API_KEYS` is a JSON object of consumer name to key. Generate real random keys:
-
-```bash
-# one key per consumer, so any one of them can be revoked alone
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-```bash
-npm run keys    # prompts for API_KEYS; paste the whole JSON object
-```
-
-```json
-{
-  "dashboard": "PASTE_A_GENERATED_KEY",
-  "partner-app": "PASTE_ANOTHER_GENERATED_KEY"
-}
-```
-
-To revoke one consumer, remove its entry and run `npm run keys` again. Nothing
-else changes, and no other consumer is disturbed.
-
-### Storing a key as a consumer
-
-- **A server or scheduled job** — your platform's secret store: GitHub Actions
-  secrets, Vercel/Netlify environment variables, Docker secrets, AWS Secrets
-  Manager. Never a committed file.
-- **The dashboard** — entered once, kept in that browser's local storage, so it
-  is not asked for again. It is only a refresh key, but anyone with access to
-  that browser profile has it; give the dashboard its own key so revoking it
-  costs nothing else. For a dashboard exposed to people you do not control, put
-  [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
-  in front of the worker instead and drop the key entirely — free for up to 50
-  users, and then the browser holds no credential at all.
-
-## The refresh API
+## The refresh API — no key
 
 ```
 POST https://pk-finance-cron.pk-microservice.workers.dev/v1/refresh
-Authorization: Bearer <refresh key>
 Content-Type: application/json
 
-{"domain": "mufap", "force": false}
+{"domain": "mufap"}
 ```
 
-`domain` is `psx`, `mufap` or `both`. Responses:
+`domain` is `psx`, `mufap` or `both`.
 
 | Status | Meaning |
 |---|---|
-| `200` | Dispatched. Body names what actually ran and how to follow it. |
-| `401` | Key not recognised. |
-| `429` | That domain was scraped within its minimum interval. `Retry-After` and `retry_after_seconds` say how long; `{"force": true}` overrides. |
-| `502` | GitHub refused the dispatch — usually an expired `GITHUB_TOKEN`. |
-| `503` | No keys configured. |
+| `200` | Dispatched. Body names what ran and how to follow it. |
+| `400` | Unknown domain. |
+| `429` | Refreshed too recently to have changed. `Retry-After` says how long. |
+| `502` | GitHub refused — usually an expired `GITHUB_TOKEN`. |
 
 ```bash
-curl -X POST https://pk-finance-cron.pk-microservice.workers.dev/v1/refresh   -H "Authorization: Bearer $PK_REFRESH_KEY"   -H "Content-Type: application/json"   -d '{"domain":"mufap"}'
+curl -X POST https://pk-finance-cron.pk-microservice.workers.dev/v1/refresh   -H "Content-Type: application/json" -d '{"domain":"mufap"}'
 ```
 
-Other endpoints need no credential: `GET /` describes the service, and
-`GET /v1/health` is liveness.
+`GET /` describes the service and `GET /v1/health` is liveness; neither needs
+anything either.
 
-**Following a run needs no credential either.** The repository is public, so the
-response's `track` block points at the run list and the freshness file, both
-readable anonymously. That is how the dashboard shows real progress without
-holding anything privileged.
+### Why it is open, and why that is safe
 
-### The rate limit
+A static dashboard cannot hold a secret — anything shipped to the browser is
+public by definition, so a key there would be theatre with a login prompt
+attached. The endpoint is open and protects itself by refusing to do anything
+pointless: it reads the published freshness file and declines if the data was
+fetched more recently than the source could possibly have changed it.
 
-Refusal is decided from the published data, not from the caller: if a domain
-was scraped within its minimum interval (PSX 30 minutes, MUFAP 20) the request
-is refused with `429`. The harm worth preventing is a redundant scrape of
-someone else's website, and that is the same harm whether one caller causes it
-twenty times or twenty callers cause it once. It also means the limit needs no
-KV namespace and no state in the worker.
+| Source | Minimum interval | Why |
+|---|---|---|
+| PSX | 240 min | One closing board per trading day. Four hours later cannot differ. |
+| MUFAP | 20 min | NAV posts at an unpredictable evening hour. |
+
+Worst case under sustained abuse: **6 PSX and 72 MUFAP runs a day**. A normal
+caller is never refused. The limit is derived from data that is already
+published, so it needs no KV namespace and no state in the worker.
+
+Overriding the throttle is deliberately not possible here — that means running
+the workflow from the Actions tab, where GitHub has already authenticated you.
 
 ## Without Cloudflare
 

@@ -18,7 +18,7 @@ Sibling branches: [`pk-micro-service`](../../tree/pk-micro-service) (PSX only) �
 
 - [Overview](#overview) · [Architecture](#architecture) · [Project structure](#project-structure)
 - [Quick start](#quick-start) · [Configuration](#configuration) · [Docker](#docker)
-- [**Scheduling & reliability**](#scheduling-and-reliability) · [**Public API** — live, no key](#public-api--live-now-no-key-required) · [Self-hosted API reference](#api-reference--self-hosted-service) · [Freshness contract](#freshness-contract)
+- [**Architecture**](docs/ARCHITECTURE.md) · [**Scheduling & reliability**](#scheduling-and-reliability) · [**Public API** — live, no key](#public-api--live-now-no-key-required) · [Self-hosted API reference](#api-reference--self-hosted-service) · [Freshness contract](#freshness-contract)
 - [Live-data strategy](#live-data-strategy) · [Caching](#caching) · [Error handling](#error-handling)
 - [Testing](#testing) · [Health checks](#health-checks) · [Monitoring](#monitoring)
 - [Deploy to GitHub Pages](#deploy-to-github-pages) · [Deploy to Vercel](#deploy-to-vercel) · [Deploy with Docker](#deploy-with-docker)
@@ -364,39 +364,47 @@ the next run genuinely is not due until Monday.
 
 ### Refresh on demand
 
-The same endpoint the dashboard's **Refresh now** button uses.
+The same endpoint the dashboard's **Refresh now** button uses. **No credential
+required.**
 
 ```bash
-curl -X POST \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://api.github.com/repos/Sohaib-Sarwar/PSX-MUFAP-MicroService/dispatches \
-  -d '{"event_type":"refresh","client_payload":{"domain":"mufap"}}'
+curl -X POST https://pk-finance-cron.pk-microservice.workers.dev/v1/refresh   -H "Content-Type: application/json"   -d '{"domain":"mufap"}'
 ```
 
-`domain` is `psx`, `mufap` or `both`. A `204` means accepted; the run appears in
-**Actions → Refresh on demand** within seconds. Event types `refresh-psx` and
-`refresh-mufap` are shorthands that need no payload.
+`domain` is `psx`, `mufap` or `both`.
 
-The token is a **fine-grained PAT** scoped to this repository with one
-permission — *Contents: Read and write*, the least GitHub accepts for
-`repository_dispatch`.
+| Status | Meaning |
+|---|---|
+| `200` | Dispatched. The body names what ran and how to follow it. |
+| `429` | That data was refreshed too recently to have changed. `Retry-After` says how long. |
+| `502` | GitHub refused the dispatch — usually an expired token on the worker. |
 
-A dispatch always fetches and always replaces: it exists because somebody wants
-the figure now, so the interval guard that protects the dense cron does not
-apply to it.
+A static site cannot keep a secret, so the endpoint is open and protects itself
+by refusing pointless work instead: it reads the published freshness file and
+declines if the source cannot have published anything new. PSX is capped at one
+refresh per four hours — it publishes one closing board per trading day — and
+MUFAP at one per twenty minutes. Worst case under sustained abuse is 6 + 72
+runs a day; a normal caller is never refused.
 
-**Watching a refresh needs no token.** The repository is public, so run status
-and job steps are readable anonymously — which is how the dashboard shows the
-real run rather than a timer pretending to be one:
+To override the throttle, run the workflow from the
+[Actions tab](https://github.com/Sohaib-Sarwar/PSX-MUFAP-MicroService/actions/workflows/refresh.yml),
+where GitHub has already authenticated you.
+
+**Following a run needs no credential either.** The repository is public, so
+the response's `track` block points at endpoints readable anonymously — which
+is how the dashboard shows the real run rather than a timer:
 
 ```bash
-gh api "repos/Sohaib-Sarwar/PSX-MUFAP-MicroService/actions/runs?event=repository_dispatch&per_page=1"
+curl -s "https://api.github.com/repos/Sohaib-Sarwar/PSX-MUFAP-MicroService/actions/runs?event=repository_dispatch&per_page=1"
 ```
 
 Poll [`freshness.json`](https://sohaib-sarwar.github.io/PSX-MUFAP-MicroService/api/freshness.json)
 until `fetched_at` moves; that, not the run turning green, is when the CDN is
-serving the new bytes.
+serving new bytes. Typical end to end: **110 seconds**.
+
+**The only credential in the system** is a GitHub fine-grained PAT with
+`Contents: Read and write`, held as a Cloudflare secret on the worker. It never
+reaches a browser, never appears in a response, and is never logged.
 
 ### Storage
 

@@ -4,12 +4,12 @@
  * Two halves, with very different permissions:
  *
  *   Firing  goes through the refresh API, which holds the GitHub token server
- *           side. The browser presents a *refresh key* — a credential whose
- *           entire capability is "scrape now". It used to present a GitHub PAT
- *           instead, which was wrong: that token can rewrite the repository,
- *           and no button that says Refresh should be backed by one. A leaked
- *           refresh key costs an unnecessary scrape; a leaked PAT is an
- *           incident.
+ *           side. The browser presents nothing at all. It used to present a
+ *           GitHub PAT, which was wrong twice over: that token can rewrite the
+ *           repository, and a static site cannot keep a secret anyway —
+ *           anything shipped to the browser is public by definition. The API
+ *           is open instead and protects itself by refusing refreshes that
+ *           cannot return different data.
  *
  *   Watching needs nothing at all. The repository is public, so run status,
  *           job steps and the published freshness file are all readable
@@ -52,25 +52,6 @@ function repoParts() {
 export const REPO = repoParts()
 export const ACTIONS_URL = `${REPO_URL}/actions/workflows/refresh.yml`
 
-const TOKEN_KEY = 'pkf.refresh.key'
-
-export function readToken() {
-  try {
-    return localStorage.getItem(TOKEN_KEY) || ''
-  } catch {
-    return ''
-  }
-}
-
-export function writeToken(token) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token)
-    else localStorage.removeItem(TOKEN_KEY)
-  } catch {
-    // Private browsing. The token simply will not persist past this tab.
-  }
-}
-
 /** Cancellable sleep — rejects on abort so the caller's loop unwinds. */
 function wait(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -87,24 +68,30 @@ function wait(ms, signal) {
   })
 }
 
-async function gh(path, { token, signal, ...init } = {}) {
-  const headers = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    ...init.headers,
-  }
-  if (token) headers.Authorization = `Bearer ${token}`
-
-  const response = await fetch(`${API}${path}`, { ...init, headers, signal })
-  if (response.status === 204) return null
+/**
+ * Read from GitHub's public API.
+ *
+ * Reads only, and anonymous by design: the repository is public, so run status
+ * and job steps need no credential. This function deliberately has no way to
+ * send one — an Authorization header here would mean the browser was holding
+ * something it should not.
+ */
+async function gh(path, { signal } = {}) {
+  const response = await fetch(`${API}${path}`, {
+    signal,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  })
   const body = await response.json().catch(() => null)
 
   if (!response.ok) {
-    const message =
-      response.status === 401 || response.status === 403
-        ? 'GitHub rejected the token. It needs Contents: Read and write on this repository.'
+    const error = new Error(
+      response.status === 403
+        ? 'GitHub is rate limiting anonymous reads. Progress will catch up shortly.'
         : body?.message || `GitHub answered ${response.status}.`
-    const error = new Error(message)
+    )
     error.status = response.status
     throw error
   }
@@ -118,17 +105,14 @@ async function gh(path, { token, signal, ...init } = {}) {
  * for: it refuses a domain scraped within its minimum interval, so requesting
  * "both" can legitimately come back having run only one.
  */
-export async function dispatchRefresh(domain, key, signal, { force = false } = {}) {
+export async function dispatchRefresh(domain, signal) {
   let response
   try {
     response = await fetch(`${REFRESH_ENDPOINT}/v1/refresh`, {
       method: 'POST',
       signal,
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ domain, force }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain }),
     })
   } catch {
     throw new Error(
@@ -139,15 +123,16 @@ export async function dispatchRefresh(domain, key, signal, { force = false } = {
 
   const body = await response.json().catch(() => null)
 
-  if (response.status === 401) {
-    throw new Error('That refresh key was not accepted.')
-  }
   if (response.status === 429) {
+    // Not an error the user caused — the data simply cannot have changed yet.
     const seconds = Math.max(...Object.values(body?.retry_after_seconds || { a: 0 }))
     const minutes = Math.ceil(seconds / 60)
+    const when = minutes >= 60
+      ? `about ${Math.round(minutes / 60)} hour${minutes >= 90 ? 's' : ''}`
+      : `about ${minutes} minute${minutes === 1 ? '' : 's'}`
     throw new Error(
-      `Already refreshed in the last few minutes. Try again in about ${minutes} ` +
-        `minute${minutes === 1 ? '' : 's'}.`
+      `Already up to date. The source has not published anything new — try ` +
+        `again in ${when}.`
     )
   }
   if (!response.ok) {
@@ -199,7 +184,6 @@ export { STAGES }
  */
 export async function runRefresh({
   domain,
-  token,
   signal,
   onProgress,
   before,
@@ -210,7 +194,7 @@ export async function runRefresh({
 
   const startedAt = Date.now()
   report('dispatch', 'Requesting refresh…', `domain: ${domain}`, 5)
-  const accepted = await dispatchRefresh(domain, token, signal)
+  const accepted = await dispatchRefresh(domain, signal)
 
   report(
     'queued',

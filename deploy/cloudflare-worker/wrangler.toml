@@ -1,26 +1,36 @@
 name = "pk-finance-cron"
 main = "worker.js"
-compatibility_date = "2026-09-01"
+compatibility_date = "2026-09-27"
 
-# The manual GET trigger needs a public URL, so workers.dev stays on. Stated
-# rather than left to default: the deploy warns about relying on the default,
-# and a worker holding a repository-write token should not have its public
-# surface decided implicitly.
+# The refresh endpoint needs a public URL. Stated rather than left to default,
+# because the deploy warns about relying on the default.
 workers_dev = true
 
-# Off. Preview URLs give every uploaded version its own public hostname. The
-# fetch route is guarded by TRIGGER_SECRET either way, but a worker that can
-# write to a GitHub repository has no business exposing one endpoint per
-# version when it only ever needs one.
+# Off. Preview URLs give every uploaded version its own public hostname, and
+# this worker only ever needs one.
 preview_urls = false
+
+# Logs and traces, on, because a scheduled trigger that quietly stops firing is
+# the failure this whole worker exists to prevent. Traces are sampled; the
+# worker runs a handful of times a day, so logs are not.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.1
 
 # UTC, and deliberately the exact times the README promises. Cloudflare fires
 # these within seconds; GitHub's own scheduler, asked for the same times, has
 # been delivering the 12:00 run between 16:17 and 18:11 and dropping five of
 # the seven evening runs. That gap is the entire reason this worker exists.
 #
-# Which domain each hour refreshes is decided by domainFor() in worker.js, and
-# covered by schedule.test.mjs — one PSX fire and seven MUFAP fires a working
+# Which domain each hour refreshes is decided by domainFor() in worker.js and
+# covered by worker.test.mjs — one PSX fire and seven MUFAP fires a working
 # day, with none wasted.
 [triggers]
 crons = [
@@ -28,6 +38,5 @@ crons = [
   "0 13-19 * * 1-5",  # 18:00 → 00:00 PKT hourly — MUFAP
 ]
 
-# Secrets are set with `npm run secrets`, never in this file:
-#   GITHUB_TOKEN    fine-grained PAT, Contents: Read and write, this repo only
-#   TRIGGER_SECRET  shared secret guarding the manual GET route
+# One secret, set with `npm run secrets`, never in this file:
+#   GITHUB_TOKEN  fine-grained PAT, Contents: Read and write, this repo only

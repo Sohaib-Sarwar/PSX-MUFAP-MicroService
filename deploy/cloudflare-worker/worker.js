@@ -1,7 +1,7 @@
 /**
  * PK Finance refresh API.
  *
- * Two jobs, and the second is the one that matters for security.
+ * Two jobs.
  *
  * 1. Punctual scheduling. GitHub's `schedule` event is best effort — measured
  *    on this repository over five working days it delivered the PSX run four
@@ -11,24 +11,31 @@
  *    between the two.
  *
  * 2. Holding the GitHub token so nobody else has to. Triggering a workflow
- *    needs a credential that can write to the repository. Handing that to every
- *    caller — a browser, an external service — hands every caller the ability
- *    to rewrite the repository, to do a job whose entire scope is "scrape now".
+ *    needs a credential that can write to the repository. The token lives here
+ *    in a Cloudflare secret and never leaves — not to a browser, not to a
+ *    caller, not into a response body.
  *
- *    So the token lives here, in a Cloudflare secret, and never leaves. Callers
- *    present a refresh key instead: a credential that does exactly one thing,
- *    is issued per consumer, and is revoked individually without touching
- *    anything else. A leaked refresh key causes an unnecessary scrape. A leaked
- *    GitHub PAT causes an incident.
+ * ── Why /v1/refresh has no key ───────────────────────────────────────────────
+ * A static dashboard cannot hold a secret: anything shipped to the browser is
+ * public by definition, so a key there would be security theatre with a login
+ * prompt attached. The endpoint is open instead, and made safe by refusing to
+ * do anything pointless: it reads the published freshness file and declines if
+ * the data was fetched more recently than it could possibly have changed.
  *
- * Deploy with `npm run login && npm run secrets && npm run deploy` from this
- * directory. Use the npm scripts rather than npx: this repository's path
- * contains an `&`, which cmd.exe treats as a command separator.
+ * That bounds the real cost. PSX publishes one closing board per trading day,
+ * so a second refresh four hours later cannot return different numbers and is
+ * refused. MUFAP posts NAV at an unpredictable evening hour, so twenty minutes
+ * is the shortest interval that can carry news. An open endpoint can therefore
+ * cause at most six PSX and seventy-two MUFAP runs a day even under sustained
+ * abuse, and a normal caller is never told no.
  *
- * Secrets:
- *   GITHUB_TOKEN    fine-grained PAT, Contents: Read and write, this repo only
- *   API_KEYS        JSON object of {"consumer-name": "key"} — see README
- *   TRIGGER_SECRET  optional; still accepted, reported as the consumer "legacy"
+ * Overriding the throttle is deliberately *not* possible here. Forcing a
+ * refresh means running the workflow from the Actions tab, where GitHub has
+ * already authenticated you.
+ *
+ * Deploy with `npm run login && npm run secrets && npm run deploy`. Use the npm
+ * scripts rather than npx: this repository's path contains an `&`, which
+ * cmd.exe treats as a command separator.
  */
 
 const OWNER = 'Sohaib-Sarwar'
@@ -39,18 +46,24 @@ const FRESHNESS_URL = `${SITE}/api/freshness.json`
 const DOMAINS = ['psx', 'mufap', 'both']
 
 /**
- * How recently a domain must have been fetched for a refresh to be refused.
+ * The shortest interval over which each source can produce different numbers.
  *
- * This is the rate limit, and it is deliberately expressed in terms of the data
- * rather than the caller: the harm worth preventing is a redundant scrape of
- * someone else's website, and that harm is the same whether it comes from one
- * caller twenty times or twenty callers once. Reading the published freshness
- * file also means the limit needs no KV namespace, no Durable Object, and no
- * state in this worker at all.
+ * This is the rate limit, and it is expressed in terms of the data rather than
+ * the caller on purpose: the harm worth preventing is a redundant scrape of
+ * someone else's website, and that harm is identical whether one caller causes
+ * it twenty times or twenty callers cause it once. Reading the published
+ * freshness file also means the limit needs no KV namespace, no Durable Object
+ * and no state in this worker at all.
  */
-const MIN_INTERVAL_MINUTES = { psx: 30, mufap: 20 }
+const MIN_INTERVAL_MINUTES = {
+  psx: 240,  // one closing board per trading day; sooner cannot differ
+  mufap: 20, // NAV lands at an unpredictable evening hour
+}
 
 const DATASET_FOR = { psx: 'psx.stocks', mufap: 'mufap.funds' }
+
+const log = (fields) => console.log(JSON.stringify(fields))
+const logError = (fields) => console.error(JSON.stringify(fields))
 
 /**
  * Which domain a given UTC time wants refreshed.
@@ -70,74 +83,12 @@ export function domainFor(date) {
   return null
 }
 
-/**
- * Match a presented key against the configured set, in constant time.
- *
- * Returns the consumer's name, or null. A plain `===` leaks the key a character
- * at a time to anyone able to measure response times, and every candidate is
- * compared rather than short-circuiting on the first match for the same reason.
- */
-export function identify(presented, apiKeysJson, legacySecret) {
-  if (!presented) return null
-
-  let keys = {}
-  try {
-    keys = apiKeysJson ? JSON.parse(apiKeysJson) : {}
-  } catch {
-    // A malformed API_KEYS must not silently authorise everyone.
-    keys = {}
-  }
-  if (legacySecret) keys.legacy = legacySecret
-
-  let matched = null
-  for (const [name, value] of Object.entries(keys)) {
-    if (typeof value === 'string' && value && timingSafeEqual(presented, value)) {
-      matched = name
-    }
-  }
-  return matched
-}
-
-function timingSafeEqual(a, b) {
-  // Every character of the longer string is compared either way, so the time
-  // taken does not depend on where the first difference falls.
-  const length = Math.max(a.length, b.length)
-  let different = a.length === b.length ? 0 : 1
-  for (let i = 0; i < length; i += 1) {
-    different |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0)
-  }
-  return different === 0
-}
-
-/** Minutes since each domain was last fetched, read from the published API. */
-async function fetchAges() {
-  try {
-    const response = await fetch(`${FRESHNESS_URL}?t=${Date.now()}`, {
-      cf: { cacheTtl: 0 },
-    })
-    if (!response.ok) return {}
-    const body = await response.json()
-    const ages = {}
-    for (const [domain, dataset] of Object.entries(DATASET_FOR)) {
-      const at = body?.datasets?.[dataset]?.fetched_at
-      if (at) ages[domain] = (Date.now() - Date.parse(at)) / 60000
-    }
-    return ages
-  } catch {
-    // If the freshness file cannot be read, allow the refresh. Refusing
-    // because a throttle could not be read would turn a CDN blip into an
-    // outage of the one mechanism that exists to recover from outages.
-    return {}
-  }
-}
-
 /** Which of the requested domains are due, and how long the rest must wait. */
-export function applyThrottle(domain, ages, force) {
+export function applyThrottle(domain, ages) {
   const wanted = domain === 'both' ? ['psx', 'mufap'] : [domain]
-  if (force) return { allowed: wanted, retryAfter: {} }
-
   const allowed = []
   const retryAfter = {}
+
   for (const name of wanted) {
     const age = ages[name]
     const minimum = MIN_INTERVAL_MINUTES[name]
@@ -148,6 +99,31 @@ export function applyThrottle(domain, ages, force) {
     }
   }
   return { allowed, retryAfter }
+}
+
+/** Minutes since each domain was last fetched, read from the published API. */
+async function fetchAges() {
+  try {
+    const response = await fetch(`${FRESHNESS_URL}?t=${Date.now()}`, {
+      cf: { cacheTtl: 0 },
+    })
+    if (!response.ok) return {}
+    // freshness.json is a fixed handful of fields, well under a kilobyte —
+    // bounded by construction, so reading it whole is safe.
+    const body = await response.json()
+    const ages = {}
+    for (const [domain, dataset] of Object.entries(DATASET_FOR)) {
+      const at = body?.datasets?.[dataset]?.fetched_at
+      if (at) ages[domain] = (Date.now() - Date.parse(at)) / 60000
+    }
+    return ages
+  } catch (error) {
+    // If the freshness file cannot be read, allow the refresh. Refusing
+    // because a throttle could not be read would turn a CDN blip into an
+    // outage of the one mechanism that exists to recover from outages.
+    logError({ message: 'freshness read failed', error: String(error) })
+    return {}
+  }
 }
 
 async function dispatch(domain, token) {
@@ -171,14 +147,13 @@ async function dispatch(domain, token) {
     }
   )
 
-  // 204 No Content is success for this endpoint.
+  // 204 No Content is success for this endpoint. The upstream body is never
+  // read or forwarded: it is not this worker's to relay, and an error page is
+  // a poor place to discover that something upstream reflected a header.
   if (response.status !== 204) {
-    // The upstream body is deliberately not echoed to the caller — it is not
-    // this worker's to forward, and an error page is a poor place to discover
-    // that something upstream reflected a header.
     throw new Error(
       response.status === 401 || response.status === 403
-        ? "The worker's GITHUB_TOKEN is missing, expired, or lacks Contents: write."
+        ? "The worker's GitHub token is missing, expired, or lacks Contents: write."
         : `GitHub rejected the dispatch (${response.status}).`
     )
   }
@@ -187,7 +162,7 @@ async function dispatch(domain, token) {
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Max-Age': '86400',
 }
 
@@ -198,15 +173,20 @@ export default {
   async scheduled(event, env, ctx) {
     const now = new Date(event.scheduledTime)
     const domain = domainFor(now)
+
     if (!domain) {
-      console.log(`${now.toISOString()}: nothing scheduled for this hour`)
+      log({ message: 'nothing scheduled', at: now.toISOString() })
       return
     }
-    // waitUntil so a slow GitHub response cannot truncate the invocation.
+
+    // The scheduled path is not throttled. It fires at the times the service
+    // promises, and those times are already the interval.
     ctx.waitUntil(
       dispatch(domain, env.GITHUB_TOKEN)
-        .then(() => console.log(`${now.toISOString()}: dispatched ${domain}`))
-        .catch((error) => console.error(`dispatch failed: ${error.message}`))
+        .then(() => log({ message: 'dispatched', domain, at: now.toISOString() }))
+        .catch((error) =>
+          logError({ message: 'scheduled dispatch failed', domain, error: error.message })
+        )
     )
   },
 
@@ -217,16 +197,13 @@ export default {
       return new Response(null, { status: 204, headers: CORS })
     }
 
-    // An unauthenticated description of the service. It reveals nothing a
-    // reader of the public repository does not already know.
     if (url.pathname === '/' || url.pathname === '/v1') {
       return json({
         service: 'PK Finance refresh API',
         docs: `https://github.com/${OWNER}/${REPO}#refresh-on-demand`,
         data: `${SITE}/api/`,
         endpoints: {
-          'POST /v1/refresh':
-            'Trigger a scrape. Authorization: Bearer <refresh key>.',
+          'POST /v1/refresh': 'Scrape now. No credential required.',
           'GET /v1/health': 'Liveness.',
         },
         domains: DOMAINS,
@@ -242,26 +219,6 @@ export default {
       return json({ error: 'Not found.' }, 404)
     }
 
-    // The key may arrive as a bearer token, or as ?key= for a one-line curl.
-    // Both are matched against the same set.
-    const header = request.headers.get('Authorization') || ''
-    const presented =
-      header.replace(/^Bearer\s+/i, '').trim() ||
-      url.searchParams.get('key') ||
-      ''
-
-    if (!env.API_KEYS && !env.TRIGGER_SECRET) {
-      return json(
-        { error: 'No refresh keys are configured. Set the API_KEYS secret.' },
-        503
-      )
-    }
-
-    const consumer = identify(presented, env.API_KEYS, env.TRIGGER_SECRET)
-    if (!consumer) {
-      return json({ error: 'Unauthorized. Present a valid refresh key.' }, 401)
-    }
-
     let payload = {}
     if (request.method === 'POST') {
       payload = await request.json().catch(() => ({}))
@@ -269,23 +226,25 @@ export default {
     const domain = String(
       payload.domain || url.searchParams.get('domain') || 'both'
     ).toLowerCase()
-    const force =
-      payload.force === true || url.searchParams.get('force') === 'true'
 
     if (!DOMAINS.includes(domain)) {
       return json({ error: `domain must be one of ${DOMAINS.join(', ')}.` }, 400)
     }
 
     const ages = await fetchAges()
-    const { allowed, retryAfter } = applyThrottle(domain, ages, force)
+    const { allowed, retryAfter } = applyThrottle(domain, ages)
 
     if (allowed.length === 0) {
       const wait = Math.max(...Object.values(retryAfter))
+      log({ message: 'throttled', domain, retry_after_seconds: wait })
       return json(
         {
-          error: 'Already refreshed recently.',
+          error: 'That data was refreshed too recently to have changed.',
           retry_after_seconds: retryAfter,
-          hint: 'Send {"force": true} to override.',
+          hint: `Run the workflow from ${SITE.replace(
+            'sohaib-sarwar.github.io',
+            'github.com'
+          )}/actions to override.`,
         },
         429,
         { 'Retry-After': String(wait) }
@@ -296,17 +255,17 @@ export default {
     try {
       await dispatch(requested, env.GITHUB_TOKEN)
     } catch (error) {
+      logError({ message: 'dispatch failed', domain: requested, error: error.message })
       return json({ error: error.message }, 502)
     }
 
+    log({ message: 'dispatched', domain: requested, skipped: Object.keys(retryAfter) })
+
     return json({
       dispatched: requested,
-      consumer,
-      forced: Boolean(force),
       skipped: retryAfter,
       at: new Date().toISOString(),
-      // Everything below is public and needs no credential, so a caller can
-      // follow the run it just started.
+      // Public, and needs no credential, so a caller can follow what it started.
       track: {
         runs: `https://api.github.com/repos/${OWNER}/${REPO}/actions/runs?event=repository_dispatch&per_page=1`,
         freshness: FRESHNESS_URL,

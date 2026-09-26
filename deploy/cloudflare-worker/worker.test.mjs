@@ -6,12 +6,12 @@
  * a credential:
  *
  *   domainFor      which upstream each scheduled fire refreshes
- *   identify       key matching, including the cases that would authorise the
- *                  wrong caller
- *   applyThrottle  when a refresh is refused as redundant
+ *   applyThrottle  when a refresh is refused as redundant, which is the only
+ *                  thing standing between an open endpoint and an abusive
+ *                  number of scrapes of someone else's website
  */
 import assert from 'node:assert/strict'
-import { applyThrottle, domainFor, identify } from './worker.js'
+import { applyThrottle, domainFor } from './worker.js'
 
 const at = (iso) => new Date(iso)
 let checks = 0
@@ -51,41 +51,39 @@ assert.equal(mapped.filter((d) => d === null).length, 0, 'no cron fire is wasted
 checks += 3
 
 
-// ── auth ────────────────────────────────────────────────────────────────────
-
-const KEYS = JSON.stringify({ dashboard: 'key-dash-1234', partner: 'key-part-5678' })
-
-assert.equal(identify('key-dash-1234', KEYS), 'dashboard', 'valid key identifies its consumer')
-assert.equal(identify('key-part-5678', KEYS), 'partner', 'second key works too')
-assert.equal(identify('key-dash-123', KEYS), null, 'a prefix is not a match')
-assert.equal(identify('key-dash-12345', KEYS), null, 'a superstring is not a match')
-assert.equal(identify('', KEYS), null, 'empty key rejected')
-assert.equal(identify(undefined, KEYS), null, 'missing key rejected')
-assert.equal(identify('anything', 'not json at all'), null, 'malformed API_KEYS authorises nobody')
-assert.equal(identify('anything', undefined), null, 'absent API_KEYS authorises nobody')
-assert.equal(identify('legacy-secret', undefined, 'legacy-secret'), 'legacy', 'TRIGGER_SECRET still accepted')
-assert.equal(identify('', undefined, ''), null, 'an empty legacy secret is not a key')
-checks += 10
-
 // ── throttle ────────────────────────────────────────────────────────────────
-// The rate limit is expressed in terms of the data, not the caller: the harm is
-// a redundant scrape of someone else's site, however many callers cause it.
-let t = applyThrottle('mufap', { mufap: 5 }, false)
+// The endpoint has no key, so this is the whole of its protection. The limit
+// is derived from how often each source can actually produce different
+// numbers: PSX publishes one closing board a trading day, MUFAP posts NAV at
+// an unpredictable evening hour.
+
+let t = applyThrottle('mufap', { mufap: 5 })
 assert.deepEqual(t.allowed, [], 'fetched 5m ago, minimum 20m -> refused')
 assert.ok(t.retryAfter.mufap > 0 && t.retryAfter.mufap <= 15 * 60, 'retry-after is the remaining wait')
 
-t = applyThrottle('mufap', { mufap: 25 }, false)
+t = applyThrottle('mufap', { mufap: 25 })
 assert.deepEqual(t.allowed, ['mufap'], 'past the interval -> allowed')
 
-t = applyThrottle('mufap', { mufap: 5 }, true)
-assert.deepEqual(t.allowed, ['mufap'], 'force overrides the throttle')
+t = applyThrottle('psx', { psx: 60 })
+assert.deepEqual(t.allowed, [], 'PSX an hour old is refused; the board cannot have changed')
 
-t = applyThrottle('both', { psx: 5, mufap: 60 }, false)
+t = applyThrottle('psx', { psx: 300 })
+assert.deepEqual(t.allowed, ['psx'], 'PSX past four hours -> allowed')
+
+t = applyThrottle('both', { psx: 5, mufap: 60 })
 assert.deepEqual(t.allowed, ['mufap'], 'both: only the due domain runs')
 assert.ok(t.retryAfter.psx > 0, 'and the other reports its wait')
 
-t = applyThrottle('both', {}, false)
+t = applyThrottle('both', {})
 assert.deepEqual(t.allowed, ['psx', 'mufap'], 'unknown ages allow the refresh')
-checks += 7
+checks += 8
 
-console.log(`worker total: ${checks} checks passed`)
+// Worst-case load an open endpoint can cause in a day, which is the number
+// that has to be defensible rather than merely small.
+const perDay = (minutes) => Math.floor((24 * 60) / minutes)
+assert.ok(perDay(240) <= 6, `PSX capped at ${perDay(240)} refreshes a day`)
+assert.ok(perDay(20) <= 72, `MUFAP capped at ${perDay(20)} refreshes a day`)
+checks += 2
+
+console.log(`worker: ${checks} checks passed`)
+console.log(`  open endpoint worst case: ${perDay(240)} PSX + ${perDay(20)} MUFAP refreshes/day`)

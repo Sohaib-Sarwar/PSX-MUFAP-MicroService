@@ -13,14 +13,7 @@ import {
   FiRefreshCw,
   FiX,
 } from 'react-icons/fi'
-import {
-  ACTIONS_URL,
-  STAGES,
-  readToken,
-  runRefresh,
-  snapshotFetchTimes,
-  writeToken,
-} from '../lib/refresh'
+import { ACTIONS_URL, STAGES, runRefresh, snapshotFetchTimes } from '../lib/refresh'
 import { int } from '../lib/format'
 
 const DOMAINS = [
@@ -39,8 +32,6 @@ const DOMAINS = [
  */
 export default function RefreshPanel({ open, onClose, counts, onDone }) {
   const [domain, setDomain] = useState('both')
-  const [token, setToken] = useState(readToken)
-  const [showToken, setShowToken] = useState(false)
   const [state, setState] = useState({ phase: 'idle' })
   const abortRef = useRef(null)
 
@@ -78,7 +69,6 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
       const before = await snapshotFetchTimes()
       const result = await runRefresh({
         domain,
-        token: token.trim(),
         signal: controller.signal,
         before,
         onProgress: ({ stage, label, detail, percent }) =>
@@ -94,7 +84,7 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
       if (error.name === 'AbortError') return
       setState({ phase: 'error', message: error.message })
     }
-  }, [domain, token, counts, onDone])
+  }, [domain, counts, onDone])
 
   const close = useCallback(() => {
     abortRef.current?.abort()
@@ -220,52 +210,15 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
           )}
 
           {!running && state.phase !== 'done' && (
-            <>
+            <div className="callout">
+              <FiKey aria-hidden="true" />
               <div>
-                <p className="sheet-label" style={{ marginBottom: 7 }}>
-                  Refresh key
-                </p>
-                <div className="field">
-                  <FiKey aria-hidden="true" />
-                  <input
-                    type={showToken ? 'text' : 'password'}
-                    value={token}
-                    placeholder="Your refresh key (remembered on this device)"
-                    autoComplete="off"
-                    spellCheck="false"
-                    onChange={(event) => {
-                      setToken(event.target.value)
-                      writeToken(event.target.value.trim())
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="field-clear"
-                    onClick={() => setShowToken((value) => !value)}
-                    aria-label={showToken ? 'Hide token' : 'Show token'}
-                  >
-                    {showToken ? '×' : '•'}
-                  </button>
-                </div>
+                Nothing to enter. The GitHub credential stays on the server; this
+                just asks it to scrape. If the source has not published anything
+                new since the last fetch, the request is declined rather than
+                repeating a scrape that cannot return different numbers.
               </div>
-
-              <div className="callout">
-                <FiKey aria-hidden="true" />
-                <div>
-                  Entered once and remembered on this device — you will not be
-                  asked again. This is a <strong>refresh key</strong>, not a
-                  GitHub token: the only thing it can do is ask for a scrape.
-                  The GitHub credential stays on the server and never reaches
-                  the browser.
-                  <br />
-                  No key to hand?{' '}
-                  <a href={ACTIONS_URL} target="_blank" rel="noreferrer noopener">
-                    Run it from the Actions tab
-                  </a>{' '}
-                  instead — same result, nothing to enter.
-                </div>
-              </div>
-            </>
+            </div>
           )}
         </div>
 
@@ -284,8 +237,7 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
                 type="button"
                 className="btn btn--primary"
                 onClick={start}
-                disabled={running || !token.trim()}
-                title={!token.trim() ? 'A refresh key is required' : undefined}
+                disabled={running}
               >
                 <FiRefreshCw aria-hidden="true" />
                 {running ? 'Refreshing…' : 'Start refresh'}
