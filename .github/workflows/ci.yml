@@ -76,6 +76,14 @@ jobs:
         working-directory: frontend
         run: npm ci --no-audit --no-fund
 
+      - name: Refresh-flow tests
+        working-directory: frontend
+        # The on-demand refresh cannot be exercised by hand without a token
+        # that writes to this repository, so it is the part most worth
+        # testing with a fake one. Every GitHub and Pages response is
+        # stubbed, so this runs offline.
+        run: npm test
+
       - name: Build
         working-directory: frontend
         env:

@@ -24,6 +24,17 @@ import { REPO_URL } from './client'
 
 const API = 'https://api.github.com'
 
+/**
+ * Poll intervals, in milliseconds. Overridable so tests can drive the whole
+ * state machine in a few milliseconds instead of a few minutes — a flow with
+ * this many waits is otherwise only testable by waiting.
+ */
+export const TIMINGS = {
+  findRun: 2000,      // how often to look for the run our dispatch created
+  runPoll: 3000,      // how often to re-read the run and its job steps
+  cdnPoll: 5000,      // how often to re-read freshness.json after the run
+}
+
 /** "https://github.com/owner/repo" -> { owner, repo } */
 function repoParts() {
   const match = /github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(REPO_URL || '')
@@ -113,7 +124,7 @@ export async function dispatchRefresh(domain, token, signal) {
  * by looking for one created after the POST. Polling starts immediately because
  * GitHub usually has the run within a second or two.
  */
-async function findRun(startedAt, signal) {
+async function findRun(startedAt, signal, timings = TIMINGS) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const body = await gh(
       `/repos/${REPO.owner}/${REPO.repo}/actions/runs` +
@@ -125,7 +136,7 @@ async function findRun(startedAt, signal) {
       (candidate) => Date.parse(candidate.created_at) >= startedAt - 5000
     )
     if (run) return run
-    await wait(2000, signal)
+    await wait(timings.findRun, signal)
   }
   return null
 }
@@ -147,7 +158,14 @@ export { STAGES }
  * Resolves with the new freshness once the published data has actually moved,
  * which is the only definition of "done" that matters to a consumer.
  */
-export async function runRefresh({ domain, token, signal, onProgress, before }) {
+export async function runRefresh({
+  domain,
+  token,
+  signal,
+  onProgress,
+  before,
+  timings = TIMINGS,
+}) {
   const report = (stage, label, detail, percent) =>
     onProgress?.({ stage, label, detail, percent })
 
@@ -156,7 +174,7 @@ export async function runRefresh({ domain, token, signal, onProgress, before }) 
   await dispatchRefresh(domain, token, signal)
 
   report('queued', 'Queued on GitHub…', 'waiting for a runner', 12)
-  const run = await findRun(startedAt, signal)
+  const run = await findRun(startedAt, signal, timings)
   if (!run) {
     throw new Error(
       'The refresh was accepted but no run appeared. Check the Actions tab.'
@@ -211,12 +229,12 @@ export async function runRefresh({ domain, token, signal, onProgress, before }) 
         report('queued', 'Queued on GitHub…', current.status, 15)
       }
     }
-    await wait(3000, signal)
+    await wait(timings.runPoll, signal)
   }
 
   // The run being green is not the same as the CDN serving the new bytes.
   report('publishing', 'Waiting for the CDN…', 'GitHub Pages is republishing', 85)
-  const fresh = await waitForNewData(before, signal)
+  const fresh = await waitForNewData(before, signal, 60, timings)
   report('live', 'Live', 'published data updated', 100)
   return { freshness: fresh, runUrl }
 }
@@ -228,7 +246,7 @@ export async function runRefresh({ domain, token, signal, onProgress, before }) 
  * browser would happily serve the pre-refresh copy for ten minutes and make a
  * successful refresh look like it did nothing.
  */
-export async function waitForNewData(before, signal, attempts = 60) {
+export async function waitForNewData(before, signal, attempts = 60, timings = TIMINGS) {
   const { API_BASE } = await import('./client')
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -250,7 +268,7 @@ export async function waitForNewData(before, signal, attempts = 60) {
     } catch (error) {
       if (error.name === 'AbortError') throw error
     }
-    await wait(5000, signal)
+    await wait(timings.cdnPoll, signal)
   }
   throw new Error(
     'The run finished but the published data has not changed yet. GitHub Pages ' +
