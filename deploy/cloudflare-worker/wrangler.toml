@@ -15,6 +15,6 @@ crons = [
   "0 13-19 * * 1-5",  # 18:00 → 00:00 PKT hourly — MUFAP
 ]
 
-# Secrets are set with `npx wrangler secret put NAME`, never in this file:
+# Secrets are set with `npm run secrets`, never in this file:
 #   GITHUB_TOKEN    fine-grained PAT, Contents: Read and write, this repo only
 #   TRIGGER_SECRET  shared secret guarding the manual GET route

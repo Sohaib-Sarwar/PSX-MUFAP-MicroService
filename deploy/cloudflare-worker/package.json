@@ -4,10 +4,11 @@
   "private": true,
   "description": "Punctual trigger for the PK Finance scrapers. GitHub's own cron runs this repo's jobs 4-6 hours late and drops most fires; this calls repository_dispatch on time instead.",
   "scripts": {
-    "login": "wrangler login",
-    "deploy": "wrangler deploy",
-    "tail": "wrangler tail",
-    "secrets": "wrangler secret put GITHUB_TOKEN && wrangler secret put TRIGGER_SECRET"
+    "login": "node ./node_modules/wrangler/bin/wrangler.js login",
+    "whoami": "node ./node_modules/wrangler/bin/wrangler.js whoami",
+    "secrets": "node ./node_modules/wrangler/bin/wrangler.js secret put GITHUB_TOKEN && node ./node_modules/wrangler/bin/wrangler.js secret put TRIGGER_SECRET",
+    "deploy": "node ./node_modules/wrangler/bin/wrangler.js deploy",
+    "tail": "node ./node_modules/wrangler/bin/wrangler.js tail"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

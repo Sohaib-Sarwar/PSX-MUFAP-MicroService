@@ -23,9 +23,24 @@ step and nothing interactive except the Cloudflare login itself.
 ```bash
 cd deploy/cloudflare-worker
 npm install
-npx wrangler login          # opens your browser once, to authorise Cloudflare
-npm run secrets             # prompts for GITHUB_TOKEN, then TRIGGER_SECRET
+npm run login       # opens your browser once, to authorise Cloudflare
+npm run secrets     # prompts for GITHUB_TOKEN, then TRIGGER_SECRET
 npm run deploy
+```
+
+> **Use `npm run login`, not `npx wrangler login`.** This repository's path
+> contains an `&` (`PSX & MUFAP Microservice`). `npx` and npm's own bin shims
+> resolve the tool to an absolute path and hand it to `cmd.exe`, which treats
+> `&` as a command separator and truncates it — you get
+> `'MUFAP' is not recognized` and a `MODULE_NOT_FOUND` for a path ending
+> `Fintraxa\wranglerin\wrangler.js`. The scripts here invoke `node` against
+> a *relative* path, so no shell ever parses the `&`. The frontend's scripts
+> do the same thing for the same reason.
+
+Check the plumbing before authorising anything:
+
+```bash
+npm run whoami      # "You are not authenticated" is the correct answer here
 ```
 
 **The token** is a fine-grained personal access token scoped to this one
@@ -39,8 +54,15 @@ outbound request.
 ## Check it works
 
 ```bash
-curl "https://pk-finance-cron.<your-subdomain>.workers.dev/?key=$TRIGGER_SECRET&domain=mufap"
+curl "https://pk-finance-cron.<your-subdomain>.workers.dev/?key=YOUR_TRIGGER_SECRET&domain=mufap"
 # {"dispatched":"mufap","at":"..."}
+```
+
+On PowerShell, quote the whole URL — an unquoted `&` splits the command there
+too:
+
+```powershell
+curl.exe "https://pk-finance-cron.<your-subdomain>.workers.dev/?key=YOUR_TRIGGER_SECRET&domain=mufap"
 ```
 
 Then watch **Actions → Refresh on demand** in the repository.
