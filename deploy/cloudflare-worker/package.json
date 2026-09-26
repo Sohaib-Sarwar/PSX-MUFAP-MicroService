@@ -1,0 +1,15 @@
+{
+  "name": "pk-finance-cron",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Punctual trigger for the PK Finance scrapers. GitHub's own cron runs this repo's jobs 4-6 hours late and drops most fires; this calls repository_dispatch on time instead.",
+  "scripts": {
+    "login": "wrangler login",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "secrets": "wrangler secret put GITHUB_TOKEN && wrangler secret put TRIGGER_SECRET"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

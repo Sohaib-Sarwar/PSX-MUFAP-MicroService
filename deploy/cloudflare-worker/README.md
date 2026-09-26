@@ -17,13 +17,15 @@ what makes the times published in the README true rather than aspirational.
 
 ## Deploy
 
+This folder is a complete, ready-to-deploy worker — there is no scaffolding
+step and nothing interactive except the Cloudflare login itself.
+
 ```bash
-npm create cloudflare@latest -- pk-finance-cron
-cd pk-finance-cron
-# replace src/index.js with worker.js and wrangler.toml with the one here
-npx wrangler secret put GITHUB_TOKEN      # see below
-npx wrangler secret put TRIGGER_SECRET    # any long random string
-npx wrangler deploy
+cd deploy/cloudflare-worker
+npm install
+npx wrangler login          # opens your browser once, to authorise Cloudflare
+npm run secrets             # prompts for GITHUB_TOKEN, then TRIGGER_SECRET
+npm run deploy
 ```
 
 **The token** is a fine-grained personal access token scoped to this one
