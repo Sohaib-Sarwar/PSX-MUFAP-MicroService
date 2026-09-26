@@ -6,11 +6,12 @@
   "scripts": {
     "login": "node ./node_modules/wrangler/bin/wrangler.js login",
     "whoami": "node ./node_modules/wrangler/bin/wrangler.js whoami",
-    "secrets": "node ./node_modules/wrangler/bin/wrangler.js secret put GITHUB_TOKEN && node ./node_modules/wrangler/bin/wrangler.js secret put TRIGGER_SECRET",
+    "secrets": "node ./node_modules/wrangler/bin/wrangler.js secret put GITHUB_TOKEN && node ./node_modules/wrangler/bin/wrangler.js secret put API_KEYS",
     "deploy": "node ./node_modules/wrangler/bin/wrangler.js deploy",
     "tail": "node ./node_modules/wrangler/bin/wrangler.js tail",
-    "test": "node schedule.test.mjs",
-    "check": "node ./node_modules/wrangler/bin/wrangler.js deploy --dry-run"
+    "test": "node worker.test.mjs",
+    "check": "node ./node_modules/wrangler/bin/wrangler.js deploy --dry-run",
+    "keys": "node ./node_modules/wrangler/bin/wrangler.js secret put API_KEYS"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

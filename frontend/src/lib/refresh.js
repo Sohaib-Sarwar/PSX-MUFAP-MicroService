@@ -3,11 +3,13 @@
  *
  * Two halves, with very different permissions:
  *
- *   Firing  needs a token, because `repository_dispatch` writes. The token is
- *           the viewer's own fine-grained PAT, kept in their browser's
- *           localStorage and sent to api.github.com and nowhere else. If they
- *           would rather not hold one, the panel falls back to deep-linking
- *           GitHub's own "Run workflow" button, which needs nothing.
+ *   Firing  goes through the refresh API, which holds the GitHub token server
+ *           side. The browser presents a *refresh key* — a credential whose
+ *           entire capability is "scrape now". It used to present a GitHub PAT
+ *           instead, which was wrong: that token can rewrite the repository,
+ *           and no button that says Refresh should be backed by one. A leaked
+ *           refresh key costs an unnecessary scrape; a leaked PAT is an
+ *           incident.
  *
  *   Watching needs nothing at all. The repository is public, so run status,
  *           job steps and the published freshness file are all readable
@@ -23,6 +25,12 @@
 import { REPO_URL } from './client'
 
 const API = 'https://api.github.com'
+
+/** The refresh API. It holds the GitHub token; the browser never sees one. */
+export const REFRESH_ENDPOINT = (
+  import.meta.env.VITE_REFRESH_ENDPOINT ||
+  'https://pk-finance-cron.pk-microservice.workers.dev'
+).replace(/\/$/, '')
 
 /**
  * Poll intervals, in milliseconds. Overridable so tests can drive the whole
@@ -44,7 +52,7 @@ function repoParts() {
 export const REPO = repoParts()
 export const ACTIONS_URL = `${REPO_URL}/actions/workflows/refresh.yml`
 
-const TOKEN_KEY = 'pkf.gh.token'
+const TOKEN_KEY = 'pkf.refresh.key'
 
 export function readToken() {
   try {
@@ -103,18 +111,49 @@ async function gh(path, { token, signal, ...init } = {}) {
   return body
 }
 
-/** Fire the refresh. Resolves once GitHub has accepted the dispatch. */
-export async function dispatchRefresh(domain, token, signal) {
-  if (!REPO.owner) throw new Error('Repository is not configured.')
-  await gh(`/repos/${REPO.owner}/${REPO.repo}/dispatches`, {
-    token,
-    signal,
-    method: 'POST',
-    body: JSON.stringify({
-      event_type: 'refresh',
-      client_payload: { domain, source: 'dashboard' },
-    }),
-  })
+/**
+ * Fire the refresh through the refresh API.
+ *
+ * Resolves with what the API dispatched, which is not always what was asked
+ * for: it refuses a domain scraped within its minimum interval, so requesting
+ * "both" can legitimately come back having run only one.
+ */
+export async function dispatchRefresh(domain, key, signal, { force = false } = {}) {
+  let response
+  try {
+    response = await fetch(`${REFRESH_ENDPOINT}/v1/refresh`, {
+      method: 'POST',
+      signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ domain, force }),
+    })
+  } catch {
+    throw new Error(
+      'Could not reach the refresh API. Check your connection, or that the ' +
+        'worker is deployed.'
+    )
+  }
+
+  const body = await response.json().catch(() => null)
+
+  if (response.status === 401) {
+    throw new Error('That refresh key was not accepted.')
+  }
+  if (response.status === 429) {
+    const seconds = Math.max(...Object.values(body?.retry_after_seconds || { a: 0 }))
+    const minutes = Math.ceil(seconds / 60)
+    throw new Error(
+      `Already refreshed in the last few minutes. Try again in about ${minutes} ` +
+        `minute${minutes === 1 ? '' : 's'}.`
+    )
+  }
+  if (!response.ok) {
+    throw new Error(body?.error || `The refresh API answered ${response.status}.`)
+  }
+  return body
 }
 
 /**
@@ -171,9 +210,14 @@ export async function runRefresh({
 
   const startedAt = Date.now()
   report('dispatch', 'Requesting refresh…', `domain: ${domain}`, 5)
-  await dispatchRefresh(domain, token, signal)
+  const accepted = await dispatchRefresh(domain, token, signal)
 
-  report('queued', 'Queued on GitHub…', 'waiting for a runner', 12)
+  report(
+    'queued',
+    'Queued on GitHub…',
+    `dispatched ${accepted?.dispatched || domain} — waiting for a runner`,
+    12
+  )
   const run = await findRun(startedAt, signal, timings)
   if (!run) {
     throw new Error(

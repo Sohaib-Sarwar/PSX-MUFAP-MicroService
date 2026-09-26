@@ -223,14 +223,14 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
             <>
               <div>
                 <p className="sheet-label" style={{ marginBottom: 7 }}>
-                  GitHub token
+                  Refresh key
                 </p>
                 <div className="field">
                   <FiKey aria-hidden="true" />
                   <input
                     type={showToken ? 'text' : 'password'}
                     value={token}
-                    placeholder="github_pat_… (stored in this browser only)"
+                    placeholder="Your refresh key (remembered on this device)"
                     autoComplete="off"
                     spellCheck="false"
                     onChange={(event) => {
@@ -252,17 +252,17 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
               <div className="callout">
                 <FiKey aria-hidden="true" />
                 <div>
-                  Starting a run writes to the repository, so GitHub requires a
-                  token. Use a <strong>fine-grained PAT</strong> scoped to this one
-                  repository with <strong>Contents: Read and write</strong> — the
-                  least GitHub accepts. It is kept in this browser's local storage
-                  and sent only to <code>api.github.com</code>.
+                  Entered once and remembered on this device — you will not be
+                  asked again. This is a <strong>refresh key</strong>, not a
+                  GitHub token: the only thing it can do is ask for a scrape.
+                  The GitHub credential stays on the server and never reaches
+                  the browser.
                   <br />
-                  Would rather not hold one?{' '}
+                  No key to hand?{' '}
                   <a href={ACTIONS_URL} target="_blank" rel="noreferrer noopener">
                     Run it from the Actions tab
                   </a>{' '}
-                  instead — no token, same result.
+                  instead — same result, nothing to enter.
                 </div>
               </div>
             </>
@@ -285,7 +285,7 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
                 className="btn btn--primary"
                 onClick={start}
                 disabled={running || !token.trim()}
-                title={!token.trim() ? 'A token is required to start a run' : undefined}
+                title={!token.trim() ? 'A refresh key is required' : undefined}
               >
                 <FiRefreshCw aria-hidden="true" />
                 {running ? 'Refreshing…' : 'Start refresh'}

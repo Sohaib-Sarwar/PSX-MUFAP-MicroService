@@ -52,9 +52,14 @@ function stubServer({
   global.fetch = vi.fn((url, init = {}) => {
     const target = String(url)
 
-    if (target.endsWith('/dispatches')) {
-      calls.dispatch.push(JSON.parse(init.body))
-      return json(null, dispatchStatus)
+    if (target.endsWith('/v1/refresh')) {
+      calls.dispatch.push({ body: JSON.parse(init.body), headers: init.headers })
+      return json(
+        dispatchStatus === 204 || dispatchStatus === 200
+          ? { dispatched: JSON.parse(init.body).domain, consumer: 'dashboard' }
+          : { error: 'nope', retry_after_seconds: { mufap: 600 } },
+        dispatchStatus === 204 ? 200 : dispatchStatus
+      )
     }
 
     if (target.includes('/actions/runs?')) {
@@ -108,34 +113,39 @@ describe('repository configuration', () => {
 })
 
 describe('dispatchRefresh', () => {
-  it('sends the payload refresh.yml actually resolves', async () => {
+  it('asks the refresh API, not GitHub', async () => {
     const calls = stubServer()
-    await dispatchRefresh('mufap', 'tok', undefined)
+    await dispatchRefresh('mufap', 'key', undefined)
 
     expect(calls.dispatch).toHaveLength(1)
-    // These two keys are the contract with .github/workflows/refresh.yml; the
-    // resolver there reads event_type and client_payload.domain and rejects
-    // anything that is not psx, mufap or both.
-    expect(calls.dispatch[0].event_type).toBe('refresh')
-    expect(calls.dispatch[0].client_payload.domain).toBe('mufap')
+    expect(calls.dispatch[0].body.domain).toBe('mufap')
+    // The browser must never talk to api.github.com to *start* a run — that
+    // would mean it was holding a credential that can write to the repository.
+    const started = global.fetch.mock.calls.map(([url]) => String(url))
+    expect(started.some((url) => url.includes('api.github.com/repos') && url.includes('dispatch')))
+      .toBe(false)
   })
 
   it.each(['psx', 'mufap', 'both'])('accepts the %s domain', async (domain) => {
     const calls = stubServer()
-    await dispatchRefresh(domain, 'tok')
-    expect(calls.dispatch[0].client_payload.domain).toBe(domain)
+    await dispatchRefresh(domain, 'key')
+    expect(calls.dispatch[0].body.domain).toBe(domain)
   })
 
-  it('explains a rejected token rather than leaking the status code', async () => {
-    stubServer({ dispatchStatus: 403 })
-    await expect(dispatchRefresh('psx', 'bad')).rejects.toThrow(/Contents: Read and write/)
+  it('explains a rejected key in plain words', async () => {
+    stubServer({ dispatchStatus: 401 })
+    await expect(dispatchRefresh('psx', 'bad')).rejects.toThrow(/was not accepted/)
   })
 
-  it('sends the token as a bearer credential', async () => {
-    stubServer()
-    await dispatchRefresh('psx', 'tok-123')
-    const [, init] = global.fetch.mock.calls[0]
-    expect(init.headers.Authorization).toBe('Bearer tok-123')
+  it('turns a throttle into a wait the user can act on', async () => {
+    stubServer({ dispatchStatus: 429 })
+    await expect(dispatchRefresh('mufap', 'key')).rejects.toThrow(/Try again in about 10 minutes/)
+  })
+
+  it('sends the refresh key as a bearer credential', async () => {
+    const calls = stubServer()
+    await dispatchRefresh('psx', 'key-123')
+    expect(calls.dispatch[0].headers.Authorization).toBe('Bearer key-123')
   })
 })
 
