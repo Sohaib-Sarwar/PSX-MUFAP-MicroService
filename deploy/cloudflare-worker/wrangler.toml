@@ -1,6 +1,9 @@
 name = "pk-finance-cron"
 main = "worker.js"
 compatibility_date = "2026-09-01"
+# Wrangler 4 is current. The keys below — main, compatibility_date and
+# [triggers] crons — and both handler signatures are unchanged from 3.x,
+# so nothing here is version-specific.
 
 # UTC, and deliberately the exact times the README promises. Cloudflare fires
 # these within seconds; GitHub's own scheduler, asked for the same times, has
