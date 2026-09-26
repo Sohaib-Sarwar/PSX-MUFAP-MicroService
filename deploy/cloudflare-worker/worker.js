@@ -11,11 +11,9 @@
  * worker is the join between the two, and it is what makes the published times
  * in the README true rather than aspirational.
  *
- * Deploy:
- *   npm create cloudflare@latest -- pk-finance-cron
- *   # replace src/index.js with this file, then:
- *   npx wrangler secret put GITHUB_TOKEN     # fine-grained PAT, see below
- *   npx wrangler deploy
+ * Deploy with `npm run login && npm run secrets && npm run deploy` from this
+ * directory. Use the npm scripts rather than npx: this repository's path
+ * contains an `&`, which cmd.exe treats as a command separator.
  *
  * The token needs exactly one permission on this one repository:
  *   Repository permissions -> Contents: Read and write
@@ -36,7 +34,7 @@ const REPO = 'PSX-MUFAP-MicroService'
  * hours here are the same ones the workflow crons ask GitHub for; the point of
  * this worker is that these actually happen.
  */
-function domainFor(date) {
+export function domainFor(date) {
   const day = date.getUTCDay() // 0 Sun .. 6 Sat
   const hour = date.getUTCHours()
 

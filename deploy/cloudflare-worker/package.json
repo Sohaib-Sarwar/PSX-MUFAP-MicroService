@@ -8,9 +8,12 @@
     "whoami": "node ./node_modules/wrangler/bin/wrangler.js whoami",
     "secrets": "node ./node_modules/wrangler/bin/wrangler.js secret put GITHUB_TOKEN && node ./node_modules/wrangler/bin/wrangler.js secret put TRIGGER_SECRET",
     "deploy": "node ./node_modules/wrangler/bin/wrangler.js deploy",
-    "tail": "node ./node_modules/wrangler/bin/wrangler.js tail"
+    "tail": "node ./node_modules/wrangler/bin/wrangler.js tail",
+    "test": "node schedule.test.mjs",
+    "check": "node ./node_modules/wrangler/bin/wrangler.js deploy --dry-run"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
-  }
+  },
+  "type": "module"
 }

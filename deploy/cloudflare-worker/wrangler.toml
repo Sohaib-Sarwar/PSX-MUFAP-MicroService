@@ -1,14 +1,27 @@
 name = "pk-finance-cron"
 main = "worker.js"
 compatibility_date = "2026-09-01"
-# Wrangler 4 is current. The keys below — main, compatibility_date and
-# [triggers] crons — and both handler signatures are unchanged from 3.x,
-# so nothing here is version-specific.
+
+# The manual GET trigger needs a public URL, so workers.dev stays on. Stated
+# rather than left to default: the deploy warns about relying on the default,
+# and a worker holding a repository-write token should not have its public
+# surface decided implicitly.
+workers_dev = true
+
+# Off. Preview URLs give every uploaded version its own public hostname. The
+# fetch route is guarded by TRIGGER_SECRET either way, but a worker that can
+# write to a GitHub repository has no business exposing one endpoint per
+# version when it only ever needs one.
+preview_urls = false
 
 # UTC, and deliberately the exact times the README promises. Cloudflare fires
 # these within seconds; GitHub's own scheduler, asked for the same times, has
 # been delivering the 12:00 run between 16:17 and 18:11 and dropping five of
 # the seven evening runs. That gap is the entire reason this worker exists.
+#
+# Which domain each hour refreshes is decided by domainFor() in worker.js, and
+# covered by schedule.test.mjs — one PSX fire and seven MUFAP fires a working
+# day, with none wasted.
 [triggers]
 crons = [
   "0 12 * * 1-5",     # 17:00 PKT — PSX, after the close
