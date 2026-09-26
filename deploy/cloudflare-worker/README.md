@@ -118,9 +118,17 @@ fetched more recently than the source could possibly have changed it.
 | PSX | 240 min | One closing board per trading day. Four hours later cannot differ. |
 | MUFAP | 20 min | NAV posts at an unpredictable evening hour. |
 
-Worst case under sustained abuse: **6 PSX and 72 MUFAP runs a day**. A normal
-caller is never refused. The limit is derived from data that is already
-published, so it needs no KV namespace and no state in the worker.
+The limit is derived from data that is already published, so it needs no KV
+namespace and no state in the worker — and that makes it eventually consistent.
+Requests arriving in the two minutes a run takes to publish all read the same
+file and all pass; three requests a second apart were measured doing exactly
+that.
+
+The bound is therefore layered: the throttle holds the steady state at 6 PSX
+and 72 MUFAP dispatches a day, GitHub's concurrency group cancels all but one
+queued run from a burst, and the dispatch workflow keeps a five-minute floor so
+the one that does start exits in seconds having found the data already fresh.
+A burst costs one scrape, not one per request.
 
 Overriding the throttle is deliberately not possible here — that means running
 the workflow from the Actions tab, where GitHub has already authenticated you.

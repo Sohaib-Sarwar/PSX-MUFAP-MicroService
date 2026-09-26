@@ -1,6 +1,9 @@
 name = "pk-finance-cron"
 main = "worker.js"
-compatibility_date = "2026-09-27"
+# UTC, not local. Cloudflare validates this against its own clock and
+# rejects anything in the future; PKT is five hours ahead, so a date taken
+# from the local calendar is a day early for most of the working evening.
+compatibility_date = "2026-09-26"
 
 # The refresh endpoint needs a public URL. Stated rather than left to default,
 # because the deploy warns about relying on the default.

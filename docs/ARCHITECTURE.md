@@ -81,7 +81,7 @@ answer does not work.
   └─────────────────────────┘               ▼
                                    ┌──────────────────┐
   ┌─────────────────────────┐      │  refresh.yml     │
-  │  GitHub cron            │      │  always fetches  │
+  │  GitHub cron            │      │  5-min floor     │
   │  0    12-17 * * 1-5     │      └──────────────────┘
   │  0,30 13-19 * * 1-5     │──┐
   └─────────────────────────┘  │   ┌──────────────────┐
@@ -163,13 +163,25 @@ fetched more recently than it could possibly have changed.
 | PSX | 240 min | One closing board per trading day. A refresh four hours later cannot return different numbers. |
 | MUFAP | 20 min | NAV lands at an unpredictable evening hour, so twenty minutes is the shortest interval that can carry news. |
 
-Worst case under sustained abuse: **6 PSX and 72 MUFAP runs a day**. A normal
-caller is never told no. Overriding the throttle is deliberately impossible
-here — that means running the workflow from the Actions tab, where GitHub has
-already authenticated you.
+Overriding the throttle is deliberately impossible here — that means running
+the workflow from the Actions tab, where GitHub has already authenticated you.
 
 The throttle needs no KV namespace, no Durable Object and no state in the
-worker, because it is derived from data that is already published.
+worker, because it is derived from data that is already published. That also
+makes it **eventually consistent**, and the gap is real: requests arriving in
+the two minutes it takes a run to publish all read the same freshness file and
+all pass. Measured — three requests one second apart all dispatched.
+
+So the bound is layered, and each layer catches what the one above cannot:
+
+| Layer | Catches | Observed |
+|---|---|---|
+| Worker throttle | the steady state | 6 PSX / 72 MUFAP dispatches a day |
+| GitHub concurrency group | the burst | 1 running + 1 queued; the rest **cancelled** |
+| `min_interval_minutes: 5` on the dispatch path | the queued one | it starts after the first published, sees data 2 min old, exits in seconds |
+
+A burst therefore costs one scrape, not one per request. No single layer is
+sufficient and none of them is load-bearing alone.
 
 ---
 

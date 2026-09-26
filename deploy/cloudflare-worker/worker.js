@@ -25,9 +25,15 @@
  * That bounds the real cost. PSX publishes one closing board per trading day,
  * so a second refresh four hours later cannot return different numbers and is
  * refused. MUFAP posts NAV at an unpredictable evening hour, so twenty minutes
- * is the shortest interval that can carry news. An open endpoint can therefore
- * cause at most six PSX and seventy-two MUFAP runs a day even under sustained
- * abuse, and a normal caller is never told no.
+ * is the shortest interval that can carry news. A normal caller is never told
+ * no.
+ *
+ * Reading published data rather than keeping counters makes this eventually
+ * consistent: requests arriving inside the two minutes a run takes to publish
+ * all see the same file and all pass. Two further layers catch that — GitHub's
+ * concurrency group cancels all but one queued run, and the dispatch workflow
+ * keeps a five-minute floor so the survivor exits having found the data fresh.
+ * A burst costs one scrape rather than one per request.
  *
  * Overriding the throttle is deliberately *not* possible here. Forcing a
  * refresh means running the workflow from the Actions tab, where GitHub has

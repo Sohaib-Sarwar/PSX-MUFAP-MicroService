@@ -14,9 +14,10 @@ name: Refresh on demand
 #     https://api.github.com/repos/OWNER/REPO/dispatches \
 #     -d '{"event_type":"refresh","client_payload":{"domain":"mufap"}}'
 #
-# `domain` is psx, mufap or both. A dispatch always fetches: it exists because
-# somebody wants the number now, so the minimum-interval guard that protects
-# the dense cron does not apply.
+# `domain` is psx, mufap or both. A dispatch keeps only a five-minute floor
+# rather than the dense cron's full interval: it exists because somebody wants
+# the number now, and five minutes is only long enough to collapse a burst that
+# arrived while the previous run was still publishing.
 
 on:
   repository_dispatch:
@@ -28,6 +29,12 @@ on:
         type: choice
         options: [both, psx, mufap]
         default: both
+      force:
+        description: >-
+          Scrape even if one succeeded in the last five minutes. On by default
+          for a manual run, because you are here on purpose.
+        type: boolean
+        default: true
 
 jobs:
   # A dispatch carries its target in the payload; a manual run carries it in an
@@ -97,7 +104,14 @@ jobs:
       cancel-in-progress: false
     with:
       domain: psx
-      force: true
+      # Not `force`. A burst of dispatches arriving inside the two minutes it
+      # takes to publish all read the same freshness file and all pass the
+      # worker's throttle; the concurrency group then serialises them and the
+      # second one would scrape again for nothing. By the time it starts, the
+      # first has published, so a five-minute floor makes it exit in seconds.
+      # The manual Actions run sets force and is unaffected.
+      min_interval_minutes: ${{ inputs.force == true && 0 || 5 }}
+      force: ${{ inputs.force == true }}
 
   mufap:
     name: MUFAP
@@ -111,7 +125,8 @@ jobs:
       cancel-in-progress: false
     with:
       domain: mufap
-      force: true
+      min_interval_minutes: ${{ inputs.force == true && 0 || 5 }}
+      force: ${{ inputs.force == true }}
 
   publish:
     name: Publish
