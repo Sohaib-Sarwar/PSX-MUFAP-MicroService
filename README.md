@@ -601,6 +601,41 @@ volume and value straight from the exchange's session header rather than
 counting the universe, because the screener's percentages cannot distinguish
 "closed unchanged" from "did not trade".
 
+### Numbers that need reading carefully
+
+Four values in this API look like ordinary numbers and are not. They are
+documented in `index.json` too, but they are the ones most likely to be
+consumed wrongly, so they are spelled out here.
+
+**A zero can mean "not published".** PSX sends `market_cap: 0` for 76 of 747
+instruments and MUFAP sends no offer or repurchase price for pension and VPS
+funds. Because a zero *price* is a number a consumer would multiply by a unit
+count, `offer_price`, `repurchase_price` and `market_price` are published as
+`null` rather than `0.0`. `market_cap` keeps the source's zero — changing it
+would break consumers that sort on it — so treat `market_cap == 0` as absent.
+Loads are the opposite: `front_end_load: 0` is real, and 481 funds have it.
+
+**`change_pct` is the instrument's last move, not necessarily today's.** The
+screener prices every listed instrument, including ones that did not trade.
+Rank movers on rows where `has_quote` is `true`; those are the ones carrying
+this session's own OHLC and volume.
+
+**Use `avg_change_pct_quoted`, not `avg_change_pct`.** The universe mean
+includes rights letters and suspended issues whose last move can be −90%, and
+that tail is enough to flip its sign: on 2026-09-27 it read −1.33% on a day
+KSE100 closed +0.15% and the quoted mean was +0.40%.
+
+**Split fund returns on `return_basis` before aggregating.** MUFAP quotes
+money-market and fixed-return plans *annualized* and the rest *absolute*, under
+one heading. `ytd_return` averages both and is flagged `mixed_basis: true`;
+`ytd_return_by_basis` gives each side separately. Blended, the industry looked
+like +5.27% year-to-date with a best of +98.08%; split, the absolute side
+averages −3.01% and tops out at +11.41%.
+
+**`data_as_of` for MUFAP is the date most funds carry, not the newest.** NAVs
+are published with a forward validity, so the newest date in a batch is usually
+tomorrow and belongs to a handful of funds.
+
 **Attribution.** Data originates from the Pakistan Stock Exchange
 (`dps.psx.com.pk`) and the Mutual Funds Association of Pakistan
 (`mufap.com.pk`), fetched within what each site's `robots.txt` permits. This
