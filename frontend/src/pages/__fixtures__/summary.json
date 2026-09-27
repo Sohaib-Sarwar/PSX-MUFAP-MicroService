@@ -1,0 +1,30 @@
+{
+ "listed_instruments": 747,
+ "traded_instruments": 493,
+ "gainers": 219,
+ "losers": 217,
+ "unchanged": 57,
+ "total_trades": 429707,
+ "total_volume": 1170632460,
+ "total_traded_value": 46454483743.0,
+ "market_capitalisation": 20136279081400.0,
+ "avg_change_pct": -1.33,
+ "instruments_with_full_quote": 120,
+ "session_at": "2026-09-25T18:47:00+05:00",
+ "market_status": "closed",
+ "avg_change_pct_quoted": 0.4,
+ "freshness": {
+  "state": "fresh",
+  "data_as_of": "2026-09-25T18:47:00+05:00",
+  "fetched_at": "2026-09-27T01:57:58.729782+05:00",
+  "overdue_seconds": 0,
+  "on_schedule": true,
+  "published_at": "2026-09-27T05:41:19+05:00",
+  "age_seconds": 13400.3,
+  "stale_after_seconds": 151321,
+  "next_refresh_at": "2026-09-28T17:00:00+05:00",
+  "record_count": 747,
+  "schedule": "Once per working day at 17:00 PKT, after the PSX close.",
+  "market_status": "closed"
+ }
+}

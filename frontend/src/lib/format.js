@@ -22,6 +22,23 @@ export function int(value) {
 }
 
 /** 1.2B / 340.5M / 12.4K — for volumes and traded value. */
+/**
+ * Like compact(), but zero reads as absent.
+ *
+ * PSX publishes 0 for market capitalisation and free float on 76 of its 747
+ * instruments — rights letters, non-compliant issues and the like. Zero there
+ * means "not published", and printing it as `0` next to a real 1.4T is a
+ * statement the source never made.
+ */
+/** Like num(), but zero reads as absent. See compactOrDash. */
+export function numOrDash(value, dp = 2) {
+  return value ? num(value, dp) : DASH
+}
+
+export function compactOrDash(value, dp = 1) {
+  return value ? compact(value, dp) : DASH
+}
+
 export function compact(value, dp = 1) {
   if (!isNum(value)) return DASH
   const abs = Math.abs(value)
@@ -75,6 +92,17 @@ export function moment(value) {
   })
 }
 
+/** "25 Sep, 01:32" — compact, for a tile that must not wrap. */
+export function clockShort(value) {
+  if (!value) return DASH
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return DASH
+  return parsed.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    hour12: false, timeZone: 'Asia/Karachi',
+  }).replace(',', '')
+}
+
 /** "25 Sep 2026, 01:32 PKT" — the absolute instant, always in Pakistan time.
  *
  * "4m ago" answers "is this recent"; it does not answer "which session is
@@ -105,17 +133,37 @@ export function ago(seconds) {
   return `${Math.round(seconds / 86400)}d ago`
 }
 
-/** "in 3h 20m" — for the next scheduled refresh. */
+/**
+ * When the next run is due, named rather than counted.
+ *
+ * "in 2d" was the old answer and it was both vague and, rounding 38 hours up,
+ * arguably wrong. The exact moment is known — it comes from the schedule — so
+ * the honest thing is to say it: "Mon 17:00". Inside a day a countdown still
+ * reads better, so that is kept for the near cases only.
+ */
 export function until(iso) {
   if (!iso) return DASH
-  const delta = (new Date(iso).getTime() - Date.now()) / 1000
-  if (Number.isNaN(delta)) return DASH
+  const target = new Date(iso)
+  if (Number.isNaN(target.getTime())) return DASH
+
+  const delta = (target.getTime() - Date.now()) / 1000
   if (delta <= 0) return 'due now'
-  const hours = Math.floor(delta / 3600)
-  const minutes = Math.round((delta % 3600) / 60)
-  if (hours >= 24) return `in ${Math.round(hours / 24)}d`
-  if (hours) return `in ${hours}h ${minutes}m`
-  return `in ${minutes}m`
+
+  if (delta < 3600) return `in ${Math.max(1, Math.round(delta / 60))}m`
+  if (delta < 8 * 3600) {
+    const hours = Math.floor(delta / 3600)
+    const minutes = Math.round((delta % 3600) / 60)
+    return minutes ? `in ${hours}h ${minutes}m` : `in ${hours}h`
+  }
+
+  const when = target.toLocaleString('en-GB', {
+    weekday: 'short', hour: '2-digit', minute: '2-digit',
+    hour12: false, timeZone: 'Asia/Karachi',
+  })
+  const sameDay =
+    target.toLocaleDateString('en-GB', { timeZone: 'Asia/Karachi' }) ===
+    new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Karachi' })
+  return sameDay ? when.split(', ').pop() : when.replace(',', '')
 }
 
 /** Title-case a SHOUTED sector name without mangling short words. */

@@ -1,17 +1,16 @@
 import { useMemo, useState } from 'react'
 import {
-  FiActivity,
-  FiBarChart2,
-  FiFilter,
-  FiLayers,
-  FiTrendingDown,
-  FiTrendingUp,
-} from 'react-icons/fi'
+  IconFilter,
+  IconPulse,
+  IconRise,
+  IconStocks,
+  IconUp,
+} from '../lib/icons'
 import DataTable from '../components/DataTable'
 import Freshness from '../components/Freshness'
-import { Badge, Card, Failed, Loading, Search, Segmented, Select, Stat } from '../components/ui'
+import { Failed, Kpi, Loading, Panel, Search, Segmented, Select, Tag } from '../components/ui'
 import { useData, useDebounced, usePage, useSort } from '../lib/hooks'
-import { DASH, compact, direction, int, num, pct, pkr, titleCase } from '../lib/format'
+import { DASH, compact, compactOrDash, direction, int, num, pct, pkr, titleCase } from '../lib/format'
 
 const VIEWS = [
   { id: 'all', label: 'All listed' },
@@ -27,11 +26,11 @@ const COLUMNS = [
     header: 'Symbol',
     render: (row) => (
       <>
-        <div className="cell-primary">
+        <div className="cell-top">
           <span className="sym">{row.symbol}</span>
-          {!row.traded && <Badge>not traded</Badge>}
-          {row.is_etf && <Badge variant="brand">ETF</Badge>}
-          {row.is_debt && <Badge variant="accent">debt</Badge>}
+          {!row.traded && <Tag>not traded</Tag>}
+          {row.is_etf && <Tag variant="brand">ETF</Tag>}
+          {row.is_debt && <Tag variant="accent">debt</Tag>}
         </div>
         <span className="cell-sub">{row.name || '—'}</span>
       </>
@@ -53,7 +52,7 @@ const COLUMNS = [
       return (
         <span className={`delta delta--${dir}`}>
           {pct(row.change_pct)}
-          <span className="pct">
+          <span className="sub">
             {row.change > 0 ? '+' : ''}
             {num(row.change)}
           </span>
@@ -65,14 +64,14 @@ const COLUMNS = [
     key: 'market_cap',
     header: 'Market cap',
     align: 'right',
-    render: (row) => <span className="num">{compact(row.market_cap)}</span>,
+    render: (row) => <span className="num">{compactOrDash(row.market_cap)}</span>,
   },
   {
     key: 'volume_30d_avg',
     header: '30d avg vol',
     align: 'right',
     hide: 'sm',
-    render: (row) => <span className="num">{compact(row.volume_30d_avg)}</span>,
+    render: (row) => <span className="num">{compactOrDash(row.volume_30d_avg)}</span>,
   },
   {
     key: 'pe_ratio',
@@ -111,7 +110,7 @@ const COLUMNS = [
     // Only present for the instruments today's bounded quote pass covered.
     render: (row) =>
       row.has_quote ? (
-        <span className="num">{compact(row.volume)}</span>
+        <span className="num">{compactOrDash(row.volume)}</span>
       ) : (
         <span className="num faint" title="PSX no longer publishes session volume in bulk">
           {DASH}
@@ -178,47 +177,34 @@ export default function Stocks({ nonce }) {
 
   return (
     <>
-      <div className="grid grid--stats">
-        <Stat icon={FiLayers} label="Listed" value={int(breadth.listed_instruments)} tone="brand" />
-        <Stat
-          icon={FiBarChart2}
-          label="Traded"
-          value={int(breadth.traded_instruments)}
-          note="in the session"
-          tone="brand"
-        />
-        <Stat icon={FiTrendingUp} label="Advancing" value={int(breadth.gainers)} tone="up" />
-        <Stat icon={FiTrendingDown} label="Declining" value={int(breadth.losers)} tone="down" />
-        <Stat
-          icon={FiActivity}
-          label="Volume"
-          value={compact(breadth.total_volume)}
-          note={pkr(breadth.total_traded_value)}
-          tone="accent"
-        />
-        <Stat
-          icon={FiTrendingUp}
+      <div className="grid grid--kpi">
+        <Kpi icon={IconStocks} label="Traded" value={int(breadth.traded_instruments)} note={`of ${int(breadth.listed_instruments)} listed`} />
+        <Kpi icon={IconRise} label="Advancing" value={int(breadth.gainers)} note={`${int(breadth.losers)} declining`} tone="up" />
+        <Kpi icon={IconPulse} label="Volume" value={compact(breadth.total_volume)} note={pkr(breadth.total_traded_value)} />
+        <Kpi
+          icon={IconUp}
           label="Average move"
-          value={pct(breadth.avg_change_pct)}
-          tone={direction(breadth.avg_change_pct)}
+          value={pct(breadth.avg_change_pct_quoted)}
+          note={`across ${int(breadth.instruments_with_full_quote)} quoted`}
+          tone={direction(breadth.avg_change_pct_quoted)}
         />
       </div>
 
       <Freshness freshness={state.bodies[0].freshness} label="PSX" />
 
-      <Card
-        icon={FiBarChart2}
+      <Panel
+        icon={IconStocks}
         title="Instruments"
-        subtitle={`${filtered.length.toLocaleString()} matching`}
+        sub={`${filtered.length.toLocaleString()} matching`}
         flush
-        actions={
-          <div className="toolbar">
+        end={
+          <div className="bar-tools">
             <Segmented options={VIEWS} value={view} onChange={changeView} label="Stock view" />
           </div>
         }
       >
-        <div className="card-body" style={{ paddingBottom: 0 }}>
-          <div className="toolbar">
+        <div className="panel-body" style={{ paddingBottom: 0 }}>
+          <div className="bar-tools">
             <div className="grow">
               <Search
                 value={query}
@@ -228,7 +214,7 @@ export default function Stocks({ nonce }) {
               />
             </div>
             <Select
-              icon={FiFilter}
+              icon={IconFilter}
               value={sector}
               onChange={setSector}
               options={sectors}
@@ -249,7 +235,7 @@ export default function Stocks({ nonce }) {
             hint: 'Clear the search or pick a different sector.',
           }}
         />
-      </Card>
+      </Panel>
     </>
   )
 }

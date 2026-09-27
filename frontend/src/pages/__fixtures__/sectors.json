@@ -1,0 +1,103 @@
+{
+ "count": 38,
+ "total_filtered": 38,
+ "total": 747,
+ "offset": 0,
+ "limit": null,
+ "freshness": {
+  "state": "fresh",
+  "data_as_of": "2026-09-25T18:47:00+05:00",
+  "fetched_at": "2026-09-27T01:57:58.729782+05:00",
+  "overdue_seconds": 0,
+  "on_schedule": true,
+  "published_at": "2026-09-27T05:41:19+05:00",
+  "age_seconds": 13400.3,
+  "stale_after_seconds": 151321,
+  "next_refresh_at": "2026-09-28T17:00:00+05:00",
+  "record_count": 747,
+  "schedule": "Once per working day at 17:00 PKT, after the PSX close.",
+  "market_status": "closed"
+ },
+ "data": [
+  {
+   "sector": "COMMERCIAL BANKS",
+   "slug": "commercial-banks",
+   "instruments": 24,
+   "gainers": 16,
+   "losers": 7,
+   "unchanged": 1,
+   "market_cap": 4833100000000,
+   "avg_change_pct": 0.56
+  },
+  {
+   "sector": "OIL & GAS EXPLORATION COMPANIES",
+   "slug": "oil-gas-exploration-companies",
+   "instruments": 4,
+   "gainers": 2,
+   "losers": 1,
+   "unchanged": 1,
+   "market_cap": 3010400000000,
+   "avg_change_pct": 0.07
+  },
+  {
+   "sector": "FERTILIZER",
+   "slug": "fertilizer",
+   "instruments": 7,
+   "gainers": 5,
+   "losers": 2,
+   "unchanged": 0,
+   "market_cap": 1810500000000,
+   "avg_change_pct": 1.07
+  },
+  {
+   "sector": "CEMENT",
+   "slug": "cement",
+   "instruments": 23,
+   "gainers": 14,
+   "losers": 6,
+   "unchanged": 3,
+   "market_cap": 1549380700000,
+   "avg_change_pct": -6.67
+  },
+  {
+   "sector": "FOOD & PERSONAL CARE PRODUCTS",
+   "slug": "food-personal-care-products",
+   "instruments": 33,
+   "gainers": 12,
+   "losers": 16,
+   "unchanged": 5,
+   "market_cap": 1352546600000,
+   "avg_change_pct": 0.29
+  },
+  {
+   "sector": "INV. BANKS / INV. COS. / SECURITIES COS.",
+   "slug": "inv-banks-inv-cos-securities-cos",
+   "instruments": 53,
+   "gainers": 18,
+   "losers": 24,
+   "unchanged": 11,
+   "market_cap": 833540200000,
+   "avg_change_pct": -0.6
+  },
+  {
+   "sector": "AUTOMOBILE ASSEMBLER",
+   "slug": "automobile-assembler",
+   "instruments": 13,
+   "gainers": 6,
+   "losers": 6,
+   "unchanged": 1,
+   "market_cap": 753870200000,
+   "avg_change_pct": -0.38
+  },
+  {
+   "sector": "TECHNOLOGY & COMMUNICATION",
+   "slug": "technology-communication",
+   "instruments": 25,
+   "gainers": 10,
+   "losers": 14,
+   "unchanged": 1,
+   "market_cap": 618951500000,
+   "avg_change_pct": -0.22
+  }
+ ]
+}

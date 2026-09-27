@@ -1,0 +1,182 @@
+{
+ "count": 25,
+ "total_filtered": 25,
+ "total": 553,
+ "offset": 0,
+ "limit": null,
+ "freshness": {
+  "state": "fresh",
+  "data_as_of": "2026-09-25",
+  "fetched_at": "2026-09-27T02:43:30.221089+05:00",
+  "overdue_seconds": 0,
+  "on_schedule": true,
+  "published_at": "2026-09-27T05:41:19+05:00",
+  "age_seconds": 10668.9,
+  "stale_after_seconds": 146789,
+  "next_refresh_at": "2026-09-28T18:00:00+05:00",
+  "record_count": 553,
+  "schedule": "Hourly on working evenings at 18:00, 19:00, 20:00, 21:00, 22:00, 23:00 and 00:00 PKT."
+ },
+ "data": [
+  {
+   "amc": "786 Investments Limited",
+   "slug": "786-investments-limited",
+   "count": 2,
+   "categories": [
+    "Shariah Compliant Income",
+    "Shariah Compliant Money Market"
+   ]
+  },
+  {
+   "amc": "ABL Asset Management Company Limited",
+   "slug": "abl-asset-management-company-limited",
+   "count": 41,
+   "categories": [
+    "Asset Allocation",
+    "Capital Protected",
+    "Equity",
+    "Fixed Rate / Return",
+    "Income",
+    "Money Market",
+    "Shariah Compliant Asset Allocation",
+    "Shariah Compliant Dedicated Equity",
+    "Shariah Compliant Equity",
+    "Shariah Compliant Fund of Funds",
+    "Shariah Compliant Fund of Funds - CPPI",
+    "Shariah Compliant Income",
+    "Shariah Compliant Money Market",
+    "VPS-Debt",
+    "VPS-Equity",
+    "VPS-Money Market",
+    "VPS-Shariah Compliant Debt",
+    "VPS-Shariah Compliant Equity",
+    "VPS-Shariah Compliant Money Market"
+   ]
+  },
+  {
+   "amc": "AKD Investment Management Limited",
+   "slug": "akd-investment-management-limited",
+   "count": 9,
+   "categories": [
+    "Aggressive Fixed Income",
+    "Equity",
+    "Index Tracker",
+    "Money Market",
+    "Shariah Compliant Equity",
+    "Shariah Compliant Income",
+    "Shariah Compliant Money Market"
+   ]
+  },
+  {
+   "amc": "AL Habib Asset Management Limited",
+   "slug": "al-habib-asset-management-limited",
+   "count": 30,
+   "categories": [
+    "Asset Allocation",
+    "Equity",
+    "Fixed Rate / Return",
+    "Income",
+    "Money Market",
+    "Shariah Compliant Equity",
+    "Shariah Compliant Fixed Rate / Return",
+    "Shariah Compliant Income",
+    "Shariah Compliant Money Market",
+    "VPS-Debt",
+    "VPS-Equity",
+    "VPS-Money Market",
+    "VPS-Shariah Compliant Debt",
+    "VPS-Shariah Compliant Equity",
+    "VPS-Shariah Compliant Money Market"
+   ]
+  },
+  {
+   "amc": "AWT Investments Limited",
+   "slug": "awt-investments-limited",
+   "count": 8,
+   "categories": [
+    "Shariah Compliant Asset Allocation",
+    "Shariah Compliant Equity",
+    "Shariah Compliant Income",
+    "Shariah Compliant Money Market",
+    "VPS-Shariah Compliant Debt",
+    "VPS-Shariah Compliant Equity",
+    "VPS-Shariah Compliant Money Market"
+   ]
+  },
+  {
+   "amc": "Al Meezan Investment Management Limited",
+   "slug": "al-meezan-investment-management-limited",
+   "count": 49,
+   "categories": [
+    "Shariah Compliant Asset Allocation",
+    "Shariah Compliant Balanced",
+    "Shariah Compliant Capital Protected",
+    "Shariah Compliant Commodities",
+    "Shariah Compliant Dedicated Equity",
+    "Shariah Compliant Equity",
+    "Shariah Compliant Exchange Traded Fund",
+    "Shariah Compliant Fixed Rate / Return",
+    "Shariah Compliant Fund of Funds",
+    "Shariah Compliant Income",
+    "Shariah Compliant Index Tracker",
+    "Shariah Compliant Money Market",
+    "VPS-Shariah Compliant Commodities / Gold",
+    "VPS-Shariah Compliant Debt",
+    "VPS-Shariah Compliant Equity",
+    "VPS-Shariah Compliant Money Market"
+   ]
+  },
+  {
+   "amc": "Alfalah Asset Management Limited",
+   "slug": "alfalah-asset-management-limited",
+   "count": 68,
+   "categories": [
+    "Aggressive Fixed Income",
+    "Asset Allocation",
+    "Capital Protected",
+    "Dedicated Equity",
+    "Equity",
+    "Exchange Traded Fund",
+    "Fixed Rate / Return",
+    "Fund of Funds",
+    "Income",
+    "Money Market",
+    "Shariah Compliant Aggressive Fixed Income",
+    "Shariah Compliant Asset Allocation",
+    "Shariah Compliant Dedicated Equity",
+    "Shariah Compliant Equity",
+    "Shariah Compliant Fixed Rate / Return",
+    "Shariah Compliant Fund of Funds",
+    "Shariah Compliant Income",
+    "Shariah Compliant Money Market",
+    "VPS-Debt",
+    "VPS-Equity",
+    "VPS-Money Market",
+    "VPS-Shariah Compliant Debt",
+    "VPS-Shariah Compliant Equity",
+    "VPS-Shariah Compliant Money Market"
+   ]
+  },
+  {
+   "amc": "Atlas Asset Management Limited",
+   "slug": "atlas-asset-management-limited",
+   "count": 28,
+   "categories": [
+    "Equity",
+    "Income",
+    "Money Market",
+    "Shariah Compliant Dedicated Equity",
+    "Shariah Compliant Equity",
+    "Shariah Compliant Fund of Funds",
+    "Shariah Compliant Income",
+    "Shariah Compliant Money Market",
+    "VPS-Debt",
+    "VPS-Equity",
+    "VPS-Money Market",
+    "VPS-Shariah Compliant Debt",
+    "VPS-Shariah Compliant Equity",
+    "VPS-Shariah Compliant Money Market"
+   ]
+  }
+ ]
+}

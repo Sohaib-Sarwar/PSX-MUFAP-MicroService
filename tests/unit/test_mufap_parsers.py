@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
 from app.infra.parsing import ColumnMapError, parse_number
@@ -153,10 +155,40 @@ def test_merged_record_carries_both_tabs(mufap_tab1_html, mufap_tab3_html):
 
 def test_validity_dates_vary_per_fund(mufap_tab1_html, mufap_tab3_html):
     """Funds do not all publish on the same day — the captured sample spans
-    Sep 09 to Sep 14 — so a single batch-level data date would be wrong."""
+    Sep 09 to Sep 14 — so a single batch-level data date is a summary, and each
+    record keeps its own."""
     returns = parsers.parse_returns_tab(mufap_tab1_html)
     prices = parsers.parse_prices_tab(mufap_tab3_html)
     merged = parsers.merge_funds(returns, prices)
     dates = {r["validity_date"] for r in merged if r["validity_date"]}
     assert len(dates) > 1
-    assert parsers.latest_validity(merged) == max(dates)
+    # The batch date describes the bulk of the batch, so it is one of the dates
+    # present and it is the one the most funds carry.
+    counts = Counter(r["validity_date"] for r in merged if r["validity_date"])
+    assert parsers.latest_validity(merged) in dates
+    assert counts[parsers.latest_validity(merged)] == max(counts.values())
+
+
+def test_batch_date_is_not_set_by_a_handful_of_forward_dated_funds():
+    """MUFAP quotes NAVs with a forward validity, so the newest date in a batch
+    is routinely tomorrow and is carried by a small minority of funds.
+
+    Taking the maximum made the envelope claim data as of a day that had not
+    happened yet: on 2026-09-27 the live snapshot reported 2026-09-28, a date
+    36 of its 553 funds carried while 408 sat on 2026-09-25.
+    """
+    rows = (
+        [{"validity_date": "2026-09-25"}] * 408
+        + [{"validity_date": "2026-09-28"}] * 36
+        + [{"validity_date": "2026-09-27"}] * 37
+    )
+    assert parsers.latest_validity(rows) == "2026-09-25"
+
+
+def test_batch_date_breaks_ties_toward_the_newer_date():
+    rows = [{"validity_date": "2026-09-25"}] * 5 + [{"validity_date": "2026-09-26"}] * 5
+    assert parsers.latest_validity(rows) == "2026-09-26"
+
+
+def test_batch_date_is_none_when_no_fund_publishes_one():
+    assert parsers.latest_validity([{"validity_date": None}, {}]) is None

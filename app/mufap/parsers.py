@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from typing import Any
 
 from ..infra.parsing import (
@@ -282,11 +283,25 @@ def merge_funds(
 
 
 def latest_validity(rows: list[dict[str, Any]]) -> str | None:
-    """The most recent validity date across the batch.
+    """The date that describes the batch as a whole.
 
-    Funds do not all publish on the same day — the live sample spanned Sep 09
-    to Sep 14 — so a single "data date" is the newest one present, and each
-    record keeps its own.
+    Funds do not all publish on the same day, so one "data date" is always a
+    summary of a spread. It used to be the maximum, which was wrong twice over.
+
+    MUFAP quotes NAVs with a *forward* validity — a fund priced on Friday is
+    published valid for the next business day — so the maximum is routinely
+    tomorrow, and the envelope claimed data as of a day that had not happened.
+    The maximum is also a minority: in the 2026-09-27 snapshot 36 of 553 funds
+    carried the top date while 408 sat on 2026-09-25, so one outlying group of
+    funds was relabelling the entire batch.
+
+    The mode is what the snapshot actually is. Ties break toward the newer date,
+    and each record still carries its own `validity_date` for anyone who needs
+    the exact spread.
     """
     dates = [r.get("validity_date") for r in rows if r.get("validity_date")]
-    return max(dates) if dates else None
+    if not dates:
+        return None
+    counts = Counter(dates)
+    top = max(counts.values())
+    return max(date for date, seen in counts.items() if seen == top)

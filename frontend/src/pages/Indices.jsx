@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react'
 import {
-  FiArrowDownRight,
-  FiArrowUpRight,
-  FiGrid,
-  FiList,
-  FiMinus,
-  FiTrendingDown,
-  FiTrendingUp,
-} from 'react-icons/fi'
+  IconDown,
+  IconFall,
+  IconFlat,
+  IconIndices,
+  IconRise,
+  IconStack,
+  IconUp,
+} from '../lib/icons'
 import Freshness from '../components/Freshness'
-import { Card, Empty, Failed, Loading, Search, Segmented, Stat } from '../components/ui'
+import { Empty, Failed, Kpi, Loading, Panel, Search, Segmented } from '../components/ui'
 import { useData, useDebounced } from '../lib/hooks'
 import { direction, int, num, pct } from '../lib/format'
 
@@ -48,21 +48,21 @@ export default function Indices({ nonce }) {
 
   return (
     <>
-      <div className="grid grid--stats">
-        <Stat icon={FiList} label="Indices" value={int(all.length)} tone="brand" />
-        <Stat icon={FiTrendingUp} label="Advancing" value={int(breadth.up)} tone="up" />
-        <Stat icon={FiTrendingDown} label="Declining" value={int(breadth.down)} tone="down" />
-        <Stat icon={FiMinus} label="Unchanged" value={int(breadth.flat)} tone="flat" />
+      <div className="grid grid--kpi">
+        <Kpi icon={IconStack} label="Indices" value={int(all.length)} tone="brand" />
+        <Kpi icon={IconUp} label="Advancing" value={int(breadth.up)} tone="up" />
+        <Kpi icon={IconDown} label="Declining" value={int(breadth.down)} tone="down" />
+        <Kpi icon={IconFlat} label="Unchanged" value={int(breadth.flat)} tone="flat" />
       </div>
 
       <Freshness freshness={body.freshness} label="PSX" />
 
-      <Card
-        icon={FiGrid}
+      <Panel
+        icon={IconIndices}
         title="Index board"
-        subtitle="Ranked by percentage move at the close"
+        sub="Ranked by percentage move at the close"
         flush={layout === 'table'}
-        actions={
+        end={
           <>
             <Search value={query} onChange={setQuery} placeholder="Index…" label="Search indices" />
             <Segmented options={LAYOUTS} value={layout} onChange={setLayout} label="Layout" />
@@ -76,12 +76,12 @@ export default function Indices({ nonce }) {
             {rows.map((index) => {
               const dir = direction(index.change)
               const Trend =
-                dir === 'up' ? FiArrowUpRight : dir === 'down' ? FiArrowDownRight : FiMinus
+                dir === 'up' ? IconRise : dir === 'down' ? IconFall : IconFlat
               return (
                 <article
                   className="quote"
                   key={index.index_name}
-                  style={{ '--tone': `var(--${dir})`, '--tone-soft': `var(--${dir}-soft)` }}
+                  style={{ '--tone': `var(--${dir})`, }}
                 >
                   <div className="quote-top">
                     <span className="quote-name">{index.index_name}</span>
@@ -89,8 +89,8 @@ export default function Indices({ nonce }) {
                       <Trend />
                     </span>
                   </div>
-                  <p className="quote-value">{num(index.current ?? index.value)}</p>
-                  <p className="quote-change">
+                  <p className="quote-v">{num(index.current ?? index.value)}</p>
+                  <p className="quote-d">
                     {index.change > 0 ? '+' : ''}
                     {num(index.change)} · {pct(index.change_pct)}
                   </p>
@@ -129,7 +129,7 @@ export default function Indices({ nonce }) {
                       <td className="right num">{num(index.current ?? index.value)}</td>
                       <td className={`right delta delta--${dir}`}>
                         {pct(index.change_pct)}
-                        <span className="pct">
+                        <span className="sub">
                           {index.change > 0 ? '+' : ''}
                           {num(index.change)}
                         </span>
@@ -143,7 +143,7 @@ export default function Indices({ nonce }) {
             </table>
           </div>
         )}
-      </Card>
+      </Panel>
     </>
   )
 }

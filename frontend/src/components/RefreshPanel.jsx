@@ -1,25 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  FiAlertTriangle,
-  FiBarChart2,
-  FiBriefcase,
-  FiCheck,
-  FiCheckCircle,
-  FiCircle,
-  FiExternalLink,
-  FiKey,
-  FiLayers,
-  FiLoader,
-  FiRefreshCw,
-  FiX,
-} from 'react-icons/fi'
+  IconCheck,
+  IconClose,
+  IconDone,
+  IconFunds,
+  IconPending,
+  IconReload,
+  IconShield,
+  IconSpinner,
+  IconStack,
+  IconStocks,
+  IconWarn,
+} from '../lib/icons'
 import { ACTIONS_URL, STAGES, runRefresh, snapshotFetchTimes } from '../lib/refresh'
 import { int } from '../lib/format'
 
 const DOMAINS = [
-  { id: 'both', label: 'Both', icon: FiLayers, note: 'PSX + MUFAP' },
-  { id: 'psx', label: 'PSX', icon: FiBarChart2, note: 'equities' },
-  { id: 'mufap', label: 'MUFAP', icon: FiBriefcase, note: 'funds' },
+  { id: 'both', label: 'Both', icon: IconStack, note: 'PSX + MUFAP' },
+  { id: 'psx', label: 'PSX', icon: IconStocks, note: 'equities' },
+  { id: 'mufap', label: 'MUFAP', icon: IconFunds, note: 'funds' },
 ]
 
 /**
@@ -99,7 +98,7 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
 
   return (
     <div
-      className="sheet-scrim"
+      className="scrim"
       role="dialog"
       aria-modal="true"
       aria-label="Refresh data"
@@ -109,7 +108,7 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
     >
       <div className="sheet">
         <header className="sheet-head">
-          <FiRefreshCw aria-hidden="true" style={{ width: 15, height: 15 }} />
+          <IconReload aria-hidden="true" style={{ width: 15, height: 15 }} />
           <h2>Refresh now</h2>
           <button
             type="button"
@@ -118,7 +117,7 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
             aria-label="Close"
             disabled={running}
           >
-            <FiX />
+            <IconClose />
           </button>
         </header>
 
@@ -128,14 +127,14 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
               <p className="sheet-label" style={{ marginBottom: 7 }}>
                 What to fetch
               </p>
-              <div className="choice-row">
+              <div className="pick-row">
                 {DOMAINS.map((option) => {
                   const Icon = option.icon
                   return (
                     <button
                       key={option.id}
                       type="button"
-                      className={`choice${domain === option.id ? ' is-active' : ''}`}
+                      className={`pick${domain === option.id ? ' is-active' : ''}`}
                       onClick={() => setDomain(option.id)}
                       disabled={running}
                       aria-pressed={domain === option.id}
@@ -151,34 +150,34 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
           )}
 
           {running && (
-            <div className="progress" role="status" aria-live="polite">
-              <div className="progress-line">
-                <FiLoader className="spin" aria-hidden="true" />
+            <div className="prog" role="status" aria-live="polite">
+              <div className="prog-line">
+                <IconSpinner className="spin" aria-hidden="true" />
                 {state.label}
               </div>
-              <div className="progress-track">
+              <div className="prog-track">
                 <div
                   className={
-                    state.percent ? 'progress-fill' : 'progress-fill progress-fill--sweep'
+                    state.percent ? 'prog-fill' : 'prog-fill prog-fill--sweep'
                   }
                   style={state.percent ? { width: `${state.percent}%` } : undefined}
                 />
               </div>
-              <p className="progress-detail">
+              <p className="prog-detail">
                 {state.stage === 'scraping'
                   ? `Fetching ${state.expected} from the source…`
                   : state.detail || '…'}
               </p>
-              <div className="progress-steps">
+              <div className="prog-steps">
                 {STAGES.map((stage, index) => {
                   const done = index < stageIndex
                   const active = index === stageIndex
                   return (
                     <div
                       key={stage.id}
-                      className={`progress-step${done ? ' is-done' : ''}${active ? ' is-active' : ''}`}
+                      className={`prog-step${done ? ' is-done' : ''}${active ? ' is-active' : ''}`}
                     >
-                      {done ? <FiCheckCircle /> : <FiCircle />}
+                      {done ? <IconDone /> : <IconPending />}
                       {stage.label}
                     </div>
                   )
@@ -188,8 +187,8 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
           )}
 
           {state.phase === 'done' && (
-            <div className="callout callout--ok">
-              <FiCheck aria-hidden="true" />
+            <div className="callout note--ok">
+              <IconCheck aria-hidden="true" />
               <div>
                 <strong>Refreshed.</strong> The published API now carries the new
                 figures.{' '}
@@ -203,15 +202,15 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
           )}
 
           {state.phase === 'error' && (
-            <div className="callout callout--warn">
-              <FiAlertTriangle aria-hidden="true" />
+            <div className="callout note--warn">
+              <IconWarn aria-hidden="true" />
               <div>{state.message}</div>
             </div>
           )}
 
           {!running && state.phase !== 'done' && (
-            <div className="callout">
-              <FiKey aria-hidden="true" />
+            <div className="note">
+              <IconShield aria-hidden="true" />
               <div>
                 Nothing to enter. The GitHub credential stays on the server; this
                 just asks it to scrape. If the source has not published anything
@@ -239,7 +238,7 @@ export default function RefreshPanel({ open, onClose, counts, onDone }) {
                 onClick={start}
                 disabled={running}
               >
-                <FiRefreshCw aria-hidden="true" />
+                <IconReload aria-hidden="true" />
                 {running ? 'Refreshing…' : 'Start refresh'}
               </button>
             </>

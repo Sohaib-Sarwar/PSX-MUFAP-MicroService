@@ -1,0 +1,62 @@
+{
+ "count": 35,
+ "total_filtered": 35,
+ "total": 553,
+ "offset": 0,
+ "limit": null,
+ "freshness": {
+  "state": "fresh",
+  "data_as_of": "2026-09-25",
+  "fetched_at": "2026-09-27T02:43:30.221089+05:00",
+  "overdue_seconds": 0,
+  "on_schedule": true,
+  "published_at": "2026-09-27T05:41:19+05:00",
+  "age_seconds": 10668.9,
+  "stale_after_seconds": 146789,
+  "next_refresh_at": "2026-09-28T18:00:00+05:00",
+  "record_count": 553,
+  "schedule": "Hourly on working evenings at 18:00, 19:00, 20:00, 21:00, 22:00, 23:00 and 00:00 PKT."
+ },
+ "data": [
+  {
+   "category": "Aggressive Fixed Income",
+   "count": 8,
+   "slug": "aggressive-fixed-income"
+  },
+  {
+   "category": "Asset Allocation",
+   "count": 15,
+   "slug": "asset-allocation"
+  },
+  {
+   "category": "Balanced",
+   "count": 4,
+   "slug": "balanced"
+  },
+  {
+   "category": "Capital Protected",
+   "count": 8,
+   "slug": "capital-protected"
+  },
+  {
+   "category": "Capital Protected - Income",
+   "count": 1,
+   "slug": "capital-protected-income"
+  },
+  {
+   "category": "Dedicated Equity",
+   "count": 1,
+   "slug": "dedicated-equity"
+  },
+  {
+   "category": "Equity",
+   "count": 29,
+   "slug": "equity"
+  },
+  {
+   "category": "Exchange Traded Fund",
+   "count": 6,
+   "slug": "exchange-traded-fund"
+  }
+ ]
+}

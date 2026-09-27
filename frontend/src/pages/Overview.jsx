@@ -1,25 +1,23 @@
 import { useMemo } from 'react'
 import {
-  FiActivity,
-  FiArrowDownRight,
-  FiArrowUpRight,
-  FiAward,
-  FiBarChart2,
-  FiBriefcase,
-  FiClock,
-  FiLayers,
-  FiMinus,
-  FiPieChart,
-  FiTrendingDown,
-  FiTrendingUp,
-} from 'react-icons/fi'
+  IconDown,
+  IconFall,
+  IconFetched,
+  IconFlat,
+  IconPulse,
+  IconRise,
+  IconSector,
+  IconStack,
+  IconUp,
+} from '../lib/icons'
 import Freshness from '../components/Freshness'
-import { Card, Failed, Loading, Stat } from '../components/ui'
+import { Failed, Kpi, Loading, Panel } from '../components/ui'
 import { useData } from '../lib/hooks'
-import { ago, clock, compact, direction, int, num, pct, pkr, titleCase } from '../lib/format'
+import { clockShort, compact, compactOrDash, direction, int, num, pct, pkr, titleCase, until } from '../lib/format'
 
-// The tile is narrow; the strip under each table carries the full instant.
-const shortClock = (value) => clock(value).replace(/^(\d{2} \w{3}) \d{4},/, '$1')
+// A point move beside a percentage reads better signed and rounded.
+const signedPts = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${num(v, 0)} pts`)
+
 
 const RESOURCES = ['summary', 'indices', 'stocks', 'sectors', 'fundStats', 'funds']
 
@@ -31,7 +29,20 @@ export default function Overview({ nonce, onNavigate }) {
     const [summary, indices, stocks, sectors, fundStats, funds] = state.bodies
 
     const stockRows = stocks.data || []
-    const withMove = stockRows.filter((row) => row.change_pct != null && row.change_pct !== 0)
+    // Ranked only among instruments carrying today's quote.
+    //
+    // The screener reports a change for all 747 listed instruments, but for one
+    // that did not trade today that change is left over from whenever it last
+    // did. Ranking the whole list therefore put stale moves on a board labelled
+    // as today's: GTECHBR at -93.55% on zero volume, FLYNGR1 at -88.89% on
+    // zero volume, a board of one-paisa rights letters that had not traded.
+    //
+    // has_quote marks the rows with this session's own OHLC and volume, so
+    // those are the only ones whose change describes today. The count is named
+    // in the panel subtitle rather than left for the reader to infer.
+    const withMove = stockRows.filter(
+      (row) => row.has_quote && row.change_pct != null && row.change_pct !== 0
+    )
 
     const rank = (ascending) =>
       [...withMove].sort((a, b) =>
@@ -53,6 +64,7 @@ export default function Overview({ nonce, onNavigate }) {
       bestFund,
       gainers: rank(false).slice(0, 6),
       losers: rank(true).slice(0, 6),
+      quotedCount: withMove.length,
       boards: (indices.data || []).slice(0, 6),
       sectors: (sectors.data || []).slice(0, 8),
     }
@@ -67,72 +79,40 @@ export default function Overview({ nonce, onNavigate }) {
 
   return (
     <>
-      <div className="grid grid--stats">
-        <Stat
-          icon={FiTrendingUp}
+      <div className="grid grid--kpi">
+        <Kpi
+          icon={IconUp}
           label="KSE 100"
-          value={headline ? num(headline.current, 2) : '—'}
-          note={
-            headline
-              ? `${pct(headline.change_pct)} · ${headline.change > 0 ? '+' : ''}${num(headline.change)} pts`
-              : 'Index board unavailable'
-          }
+          value={headline ? num(headline.current, 0) : '—'}
+          note={headline ? `${pct(headline.change_pct)} · ${signedPts(headline.change)}` : 'index board unavailable'}
           tone={headline ? direction(headline.change) : 'flat'}
         />
-        <Stat
-          icon={FiArrowUpRight}
-          label="Advancing"
-          value={int(breadth.gainers)}
-          note={`${int(breadth.losers)} declining · ${int(breadth.unchanged)} flat`}
-          tone="up"
+        <Kpi
+          icon={IconRise}
+          label="Breadth"
+          value={`${int(breadth.gainers)} / ${int(breadth.losers)}`}
+          note={`up / down · ${int(breadth.unchanged)} flat`}
+          tone={(breadth.gainers || 0) >= (breadth.losers || 0) ? 'up' : 'down'}
         />
-        <Stat
-          icon={FiActivity}
-          label="Volume"
-          value={compact(breadth.total_volume)}
-          note={`${pkr(breadth.total_traded_value)} traded`}
-          tone="brand"
-        />
-        <Stat
-          icon={FiClock}
-          label="Data fetched"
-          value={shortClock(stocks.freshness?.fetched_at)}
-          note={`PSX · ${ago((Date.now() - Date.parse(stocks.freshness?.fetched_at || 0)) / 1000)}`}
-          tone="brand"
-        />
-        <Stat
-          icon={FiBarChart2}
-          label="Instruments"
-          value={int(breadth.traded_instruments)}
-          note={`traded of ${int(breadth.listed_instruments)} listed`}
-          tone="brand"
-        />
-        <Stat
-          icon={FiBriefcase}
-          label="Mutual funds"
-          value={int(stats.total_funds)}
-          note={`${int(stats.total_categories)} categories`}
-          tone="accent"
-        />
-        <Stat
-          icon={FiAward}
-          label="Best fund YTD"
-          value={bestFund ? pct(bestFund.returns.ytd) : '—'}
-          note={bestFund ? bestFund.fund_name : 'No return data'}
-          tone="up"
+        <Kpi icon={IconPulse} label="Volume" value={compact(breadth.total_volume)} note={pkr(breadth.total_traded_value)} />
+        <Kpi
+          icon={IconFetched}
+          label="Fetched"
+          value={clockShort(stocks.freshness?.fetched_at)}
+          note={`next ${until(stocks.freshness?.next_refresh_at)}`}
         />
       </div>
 
-      <div className="grid grid--halves">
+      <div className="grid grid--split">
         <Freshness freshness={stocks.freshness} label="PSX" />
         <Freshness freshness={funds.freshness} label="MUFAP" />
       </div>
 
-      <Card
-        icon={FiLayers}
+      <Panel
+        icon={IconStack}
         title="Index board"
-        subtitle={`${(indices.data || []).length} indices at the close`}
-        actions={
+        sub={`${(indices.data || []).length} indices at the close`}
+        end={
           <button type="button" className="btn btn--sm" onClick={() => onNavigate('indices')}>
             View all
           </button>
@@ -142,12 +122,12 @@ export default function Overview({ nonce, onNavigate }) {
           {view.boards.map((index) => {
             const dir = direction(index.change)
             const Trend =
-              dir === 'up' ? FiArrowUpRight : dir === 'down' ? FiArrowDownRight : FiMinus
+              dir === 'up' ? IconRise : dir === 'down' ? IconFall : IconFlat
             return (
               <article
                 className="quote"
                 key={index.index_name}
-                style={{ '--tone': `var(--${dir})`, '--tone-soft': `var(--${dir}-soft)` }}
+                style={{ '--tone': `var(--${dir})`, }}
               >
                 <div className="quote-top">
                   <span className="quote-name">{index.index_name}</span>
@@ -155,8 +135,8 @@ export default function Overview({ nonce, onNavigate }) {
                     <Trend />
                   </span>
                 </div>
-                <p className="quote-value">{num(index.current ?? index.value)}</p>
-                <p className="quote-change">
+                <p className="quote-v">{num(index.current ?? index.value)}</p>
+                <p className="quote-d">
                   {index.change > 0 ? '+' : ''}
                   {num(index.change)} · {pct(index.change_pct)}
                 </p>
@@ -170,29 +150,31 @@ export default function Overview({ nonce, onNavigate }) {
             )
           })}
         </div>
-      </Card>
+      </Panel>
 
-      <div className="grid grid--halves">
+      <div className="grid grid--split">
         <MoverCard
           title="Top gainers"
-          icon={FiTrendingUp}
+          icon={IconUp}
           rows={view.gainers}
+          quoted={view.quotedCount}
           tone="up"
           onNavigate={onNavigate}
         />
         <MoverCard
           title="Top losers"
-          icon={FiTrendingDown}
+          icon={IconDown}
           rows={view.losers}
+          quoted={view.quotedCount}
           tone="down"
           onNavigate={onNavigate}
         />
       </div>
 
-      <Card
-        icon={FiPieChart}
+      <Panel
+        icon={IconSector}
         title="Sector activity"
-        subtitle="Largest sectors by combined market capitalisation"
+        sub="Largest sectors by combined market capitalisation"
         flush
       >
         <div className="table-wrap">
@@ -220,7 +202,7 @@ export default function Overview({ nonce, onNavigate }) {
                     <td className="right num hide-sm delta--up">{int(sector.gainers)}</td>
                     <td className="right num hide-sm delta--down">{int(sector.losers)}</td>
                     <td className="right num barcell">
-                      {compact(sector.market_cap)}
+                      {compactOrDash(sector.market_cap)}
                       <span
                         className="bar"
                         style={{ width: `${Math.max(share * 0.6, 2)}px`, '--tone': `var(--${dir})` }}
@@ -233,19 +215,19 @@ export default function Overview({ nonce, onNavigate }) {
             </tbody>
           </table>
         </div>
-      </Card>
+      </Panel>
     </>
   )
 }
 
-function MoverCard({ title, icon, rows, tone, onNavigate }) {
+function MoverCard({ title, icon, rows, quoted, tone, onNavigate }) {
   return (
-    <Card
+    <Panel
       icon={icon}
       title={title}
-      subtitle="By percentage move at the close"
+      sub={`Among ${int(quoted)} instruments quoted today`}
       flush
-      actions={
+      end={
         <button type="button" className="btn btn--sm" onClick={() => onNavigate('stocks')}>
           All stocks
         </button>
@@ -265,7 +247,7 @@ function MoverCard({ title, icon, rows, tone, onNavigate }) {
             {rows.map((row, position) => (
               <tr key={row.symbol}>
                 <td>
-                  <div className="cell-primary">
+                  <div className="cell-top">
                     <span className="rank">{position + 1}</span>
                     <span className="sym">{row.symbol}</span>
                   </div>
@@ -274,17 +256,17 @@ function MoverCard({ title, icon, rows, tone, onNavigate }) {
                 <td className="right num">{num(row.current)}</td>
                 <td className={`right delta delta--${tone}`}>
                   {pct(row.change_pct)}
-                  <span className="pct">
+                  <span className="sub">
                     {row.change > 0 ? '+' : ''}
                     {num(row.change)}
                   </span>
                 </td>
-                <td className="right num hide-sm">{compact(row.market_cap)}</td>
+                <td className="right num hide-sm">{compactOrDash(row.market_cap)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </Card>
+    </Panel>
   )
 }

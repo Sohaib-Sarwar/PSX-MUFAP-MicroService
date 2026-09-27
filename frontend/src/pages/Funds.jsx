@@ -1,17 +1,17 @@
 import { useMemo, useState } from 'react'
 import {
-  FiAward,
-  FiBriefcase,
-  FiFilter,
-  FiHome,
-  FiLayers,
-  FiTrendingUp,
-} from 'react-icons/fi'
+  IconBest,
+  IconFilter,
+  IconFunds,
+  IconServer,
+  IconStack,
+  IconUp,
+} from '../lib/icons'
 import DataTable from '../components/DataTable'
 import Freshness from '../components/Freshness'
-import { Badge, Card, Failed, Loading, Search, Segmented, Select, Stat } from '../components/ui'
+import { Failed, Kpi, Loading, Panel, Search, Segmented, Select, Tag } from '../components/ui'
 import { useData, useDebounced, usePage, useSort } from '../lib/hooks'
-import { day, direction, int, num, pct } from '../lib/format'
+import { day, direction, int, num, numOrDash, pct } from '../lib/format'
 
 // The periods worth a one-tap button. The API publishes eleven; these five are
 // the ones an investor actually compares on.
@@ -91,10 +91,10 @@ export default function Funds({ nonce }) {
         header: 'Fund',
         render: (fund) => (
           <>
-            <div className="cell-primary">
+            <div className="cell-top">
               <span className="sym">{fund.fund_name}</span>
-              {fund.rating && <Badge variant="brand">{fund.rating}</Badge>}
-              {fund.sector?.toLowerCase().includes('voluntary') && <Badge variant="accent">VPS</Badge>}
+              {fund.rating && <Tag variant="brand">{fund.rating}</Tag>}
+              {fund.sector?.toLowerCase().includes('voluntary') && <Tag variant="accent">VPS</Tag>}
             </div>
             <span className="cell-sub">{fund.amc || '—'}</span>
           </>
@@ -131,14 +131,14 @@ export default function Funds({ nonce }) {
         header: 'Offer',
         align: 'right',
         hide: 'sm',
-        render: (fund) => <span className="num">{num(fund.offer_price, 4)}</span>,
+        render: (fund) => <span className="num">{numOrDash(fund.offer_price, 4)}</span>,
       },
       {
         key: 'repurchase_price',
         header: 'Repurchase',
         align: 'right',
         hide: 'md',
-        render: (fund) => <span className="num">{num(fund.repurchase_price, 4)}</span>,
+        render: (fund) => <span className="num">{numOrDash(fund.repurchase_price, 4)}</span>,
       },
       {
         key: 'front_end_load',
@@ -162,45 +162,49 @@ export default function Funds({ nonce }) {
   if (state.status === 'loading') return <Loading rows={9} />
   if (state.status === 'error') return <Failed error={state.error} />
 
-  const best = stats.ytd_return || {}
+  // Absolute returns are what "the fund made X this year" means to a reader.
+  // The annualized side — money-market and fixed-return plans — is summarised
+  // on its own, because mixing the two produced a headline best of +98% from a
+  // three-month fixed-return plan. Each KPI names the basis it is reporting.
+  const byBasis = stats.ytd_return_by_basis || {}
+  const best = byBasis.absolute || {}
+  const annualized = byBasis.annualized || {}
   const nav = stats.nav || {}
 
   return (
     <>
-      <div className="grid grid--stats">
-        <Stat icon={FiBriefcase} label="Funds" value={int(stats.total_funds)} tone="brand" />
-        <Stat icon={FiLayers} label="Categories" value={int(stats.total_categories)} tone="brand" />
-        <Stat icon={FiHome} label="AMCs" value={int(amcs.length - 1)} tone="accent" />
-        <Stat
-          icon={FiAward}
+      <div className="grid grid--kpi">
+        <Kpi icon={IconFunds} label="Funds" value={int(stats.total_funds)} note={`${int(stats.total_categories)} categories · ${int(amcs.length - 1)} AMCs`} />
+        <Kpi
+          icon={IconBest}
           label="Best YTD"
           value={pct(best.best)}
-          note={`${int(best.reported_by)} funds reporting`}
+          note={`absolute basis · ${int(best.reported_by)} funds`}
           tone="up"
         />
-        <Stat icon={FiTrendingUp} label="Mean YTD" value={pct(best.mean)} tone={direction(best.mean)} />
-        <Stat
-          icon={FiBriefcase}
-          label="Median NAV"
-          value={num(nav.median, 2)}
-          note={`range ${num(nav.min, 2)} – ${num(nav.max, 2)}`}
-          tone="flat"
+        <Kpi
+          icon={IconUp}
+          label="Mean YTD"
+          value={pct(best.mean)}
+          note={`absolute basis · ${pct(annualized.mean)} annualized`}
+          tone={direction(best.mean)}
         />
+        <Kpi icon={IconStack} label="Median NAV" value={num(nav.median, 2)} note={`${num(nav.min, 2)} – ${num(nav.max, 2)}`} />
       </div>
 
       <Freshness freshness={body.freshness} label="MUFAP" />
 
-      <Card
-        icon={FiBriefcase}
+      <Panel
+        icon={IconFunds}
         title="Funds"
-        subtitle={`${filtered.length.toLocaleString()} matching`}
+        sub={`${filtered.length.toLocaleString()} matching`}
         flush
-        actions={
+        end={
           <Segmented options={PERIODS} value={period} onChange={changePeriod} label="Return period" />
         }
       >
-        <div className="card-body" style={{ paddingBottom: 0 }}>
-          <div className="toolbar">
+        <div className="panel-body" style={{ paddingBottom: 0 }}>
+          <div className="bar-tools">
             <div className="grow">
               <Search
                 value={query}
@@ -210,14 +214,14 @@ export default function Funds({ nonce }) {
               />
             </div>
             <Select
-              icon={FiFilter}
+              icon={IconFilter}
               value={category}
               onChange={setCategory}
               options={categories}
               label="Filter by category"
             />
             <Select
-              icon={FiHome}
+              icon={IconServer}
               value={amc}
               onChange={setAmc}
               options={amcs}
@@ -238,7 +242,7 @@ export default function Funds({ nonce }) {
             hint: 'Clear the search or choose a different category.',
           }}
         />
-      </Card>
+      </Panel>
     </>
   )
 }

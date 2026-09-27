@@ -324,6 +324,7 @@ def _build_summary(rows: list[dict], session: dict[str, Any]) -> dict[str, Any]:
     """
     changes = [r["change_pct"] for r in rows if r.get("change_pct") is not None]
     quoted = [r for r in rows if r.get("has_quote")]
+    quoted_changes = [r["change_pct"] for r in quoted if r.get("change_pct") is not None]
     caps = [r["market_cap"] for r in rows if r.get("market_cap")]
 
     return {
@@ -337,8 +338,18 @@ def _build_summary(rows: list[dict], session: dict[str, Any]) -> dict[str, Any]:
         "total_volume": session.get("total_volume"),
         "total_traded_value": session.get("total_traded_value"),
         "market_capitalisation": round(sum(caps), 2) if caps else None,
-        # Derived across the listed universe, not the traded subset.
+        # Derived across the listed universe, not the traded subset. The
+        # screener prices every listed instrument, including rights letters and
+        # suspended shells whose last move can be -90%, so this mean has a long
+        # tail that no index reflects. Kept because consumers read it, but the
+        # figure worth showing is the next one.
         "avg_change_pct": round(sum(changes) / len(changes), 2) if changes else None,
+        # The same mean over instruments carrying this session's own quote.
+        # On 2026-09-27 the two disagreed on direction: -1.33% across the
+        # universe against +0.40% here, while KSE100 closed +0.15%.
+        "avg_change_pct_quoted": (
+            round(sum(quoted_changes) / len(quoted_changes), 2) if quoted_changes else None
+        ),
         "instruments_with_full_quote": len(quoted),
         "session_at": session.get("session_at"),
         "market_status": session.get("market_status"),

@@ -1,23 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  FiBarChart2,
-  FiBriefcase,
-  FiCode,
-  FiGithub,
-  FiGrid,
-  FiHome,
-  FiMenu,
-  FiMoon,
-  FiRefreshCw,
-  FiSun,
-  FiZap,
-  FiTrendingUp,
-  FiX,
-} from 'react-icons/fi'
+  IconApi,
+  IconClose,
+  IconFunds,
+  IconHome,
+  IconIndices,
+  IconMenu,
+  IconRefresh,
+  IconReload,
+  IconSource,
+  IconStocks,
+  IconUp,
+} from './lib/icons'
 import { clearCache, knownCounts, load, REPO_URL } from './lib/client'
-import RefreshPanel from './components/RefreshPanel'
-import { useRoute, useTheme } from './lib/hooks'
+import { useRoute } from './lib/hooks'
 import { int } from './lib/format'
+import RefreshPanel from './components/RefreshPanel'
+import Landing from './pages/Landing'
 import Overview from './pages/Overview'
 import Stocks from './pages/Stocks'
 import Indices from './pages/Indices'
@@ -25,149 +24,137 @@ import Funds from './pages/Funds'
 import ApiDocs from './pages/ApiDocs'
 
 const PAGES = {
-  overview: { label: 'Overview', icon: FiHome, title: 'Market overview',
-              blurb: 'PSX close and MUFAP NAVs at a glance', component: Overview },
-  stocks: { label: 'Stocks', icon: FiBarChart2, title: 'Pakistan Stock Exchange',
-            blurb: 'Every listed instrument at the close', component: Stocks,
-            count: 'psx.stocks' },
-  indices: { label: 'Indices', icon: FiGrid, title: 'Index board',
-             blurb: 'KSE100, KSE30, KMI30 and the rest', component: Indices,
-             count: 'psx.indices' },
-  funds: { label: 'Mutual funds', icon: FiBriefcase, title: 'MUFAP mutual funds',
-           blurb: 'Daily NAV, loads and returns by fund', component: Funds,
-           count: 'mufap.funds' },
-  api: { label: 'API reference', icon: FiCode, title: 'API reference',
-         blurb: 'Endpoints, schemas and the freshness contract', component: ApiDocs },
+  home: {
+    label: 'Home', icon: IconHome, title: 'PK Finance',
+    blurb: 'Pakistan market data as a JSON API', component: Landing, bare: true,
+  },
+  overview: {
+    label: 'Overview', icon: IconHome, title: 'Market overview',
+    blurb: 'The session at a glance', component: Overview,
+  },
+  stocks: {
+    label: 'Stocks', icon: IconStocks, title: 'Pakistan Stock Exchange',
+    blurb: 'Every listed instrument', component: Stocks, count: 'psx.stocks',
+  },
+  indices: {
+    label: 'Indices', icon: IconIndices, title: 'Index board',
+    blurb: 'KSE100, KSE30, KMI30 and the rest', component: Indices, count: 'psx.indices',
+  },
+  funds: {
+    label: 'Mutual funds', icon: IconFunds, title: 'MUFAP mutual funds',
+    blurb: 'Daily NAV, loads and returns', component: Funds, count: 'mufap.funds',
+  },
+  api: {
+    label: 'API reference', icon: IconApi, title: 'API reference',
+    blurb: 'Endpoints, fields and the freshness contract', component: ApiDocs,
+  },
 }
 
-const ORDER = ['overview', 'stocks', 'indices', 'funds', 'api']
+const DATA_PAGES = ['overview', 'stocks', 'indices', 'funds']
 
 export default function App() {
-  const [route, navigate] = useRoute('overview')
-  const [theme, toggleTheme] = useTheme()
+  const [route, navigate] = useRoute('home')
   const [nonce, setNonce] = useState(0)
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
   const [meta, setMeta] = useState(null)
   const [market, setMarket] = useState(null)
   const [refreshOpen, setRefreshOpen] = useState(false)
 
-  const page = PAGES[route] || PAGES.overview
+  const page = PAGES[route] || PAGES.home
   const Page = page.component
 
   useEffect(() => {
     let cancelled = false
-    // Both feed chrome only — a failure here must not take the page with it.
-    load('catalog')
-      .then((body) => !cancelled && setMeta(body))
-      .catch(() => !cancelled && setMeta(null))
-    load('marketStatus')
-      .then((body) => !cancelled && setMarket(body))
-      .catch(() => !cancelled && setMarket(null))
+    // Both feed chrome only; a failure here must not take the page with it.
+    load('catalog').then((b) => !cancelled && setMeta(b)).catch(() => !cancelled && setMeta(null))
+    load('marketStatus').then((b) => !cancelled && setMarket(b)).catch(() => !cancelled && setMarket(null))
     return () => {
       cancelled = true
     }
   }, [nonce])
 
   useEffect(() => {
-    setMenuOpen(false)
+    setNavOpen(false)
   }, [route])
 
   useEffect(() => {
-    document.title = `${page.title} · PK Finance`
-  }, [page.title])
+    // The landing page is already called PK Finance; repeating it reads as a bug.
+    document.title = page.bare ? 'PK Finance — Pakistan market data' : `${page.title} · PK Finance`
+  }, [page.title, page.bare])
 
-  // Reload = re-read what is published. Refresh = go and scrape it again.
-  // They are different actions and used to be conflated in one button, which
-  // is why the button appeared to do nothing on a CDN with a ten-minute cache.
+  // Reload re-reads what is published. Refresh goes and scrapes it again. Two
+  // actions, two buttons — conflating them is what made a single button look
+  // broken against a CDN cache.
   const reload = useCallback(() => {
     clearCache()
     setNonce((value) => value + 1)
   }, [])
 
-  const go = useCallback(
-    (next) => {
-      navigate(next)
-    },
-    [navigate]
-  )
-
+  const go = useCallback((next) => navigate(next), [navigate])
   const status = market?.status
 
   return (
     <div className="shell">
-      {menuOpen && <div className="scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />}
+      {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />}
 
-      <aside className={menuOpen ? 'sidebar is-open' : 'sidebar'}>
-        <div className="brand">
+      <aside className={navOpen ? 'nav is-open' : 'nav'}>
+        <button type="button" className="brand" onClick={() => go('home')}>
           <span className="brand-mark" aria-hidden="true">
-            <FiTrendingUp />
+            <IconUp />
           </span>
-          <div>
-            <div className="brand-name">PK Finance</div>
-            <div className="brand-sub">Market data service</div>
-          </div>
-        </div>
+          <span>
+            <span className="brand-name" style={{ display: 'block' }}>
+              PK Finance
+            </span>
+            <span className="brand-sub">Market data service</span>
+          </span>
+        </button>
 
         <p className="nav-label">Data</p>
-        {ORDER.slice(0, 4).map((id) => (
+        {DATA_PAGES.map((id) => (
           <NavItem key={id} id={id} active={route === id} onClick={go} meta={meta} />
         ))}
 
         <p className="nav-label">Developers</p>
         <NavItem id="api" active={route === 'api'} onClick={go} meta={meta} />
         <a className="nav-item" href={REPO_URL} target="_blank" rel="noreferrer noopener">
-          <FiGithub aria-hidden="true" />
+          <IconSource aria-hidden="true" />
           Source
         </a>
 
-        <div className="sidebar-foot">
-          <span>
-            {meta?.version ? `v${meta.version}` : 'PK Finance'} · data from PSX and MUFAP
-          </span>
-          <span>Times shown in Pakistan Standard Time.</span>
+        <div className="nav-foot">
+          <span>{meta?.version ? `v${meta.version}` : 'PK Finance'} · PSX and MUFAP</span>
+          <span>Times in Pakistan Standard Time</span>
         </div>
       </aside>
 
       <div className="main">
-        <header className="topbar">
+        <header className="bar">
           <button
             type="button"
-            className="btn btn--icon menu-button"
-            aria-label={menuOpen ? 'Close navigation' : 'Open navigation'}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((value) => !value)}
+            className="btn btn--icon nav-toggle"
+            aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen((value) => !value)}
           >
-            {menuOpen ? <FiX /> : <FiMenu />}
+            {navOpen ? <IconClose /> : <IconMenu />}
           </button>
 
           <div>
             <h1>{page.title}</h1>
-            <p className="topbar-sub hide-sm">{page.blurb}</p>
+            <p className="bar-sub hide-sm">{page.blurb}</p>
           </div>
 
-          <div className="topbar-right">
+          <div className="bar-right">
             {status && (
-              <span
-                className={`badge badge--${status === 'open' ? 'up' : 'outline'} hide-sm`}
-                title={market.last_tick ? `Last tick ${market.last_tick}` : undefined}
-              >
-                <span className={status === 'open' ? 'dot dot--pulse' : 'dot'} />
+              <span className={`tag ${status === 'open' ? 'tag--up' : 'tag--line'} hide-sm`}>
+                <span className={status === 'open' ? 'dot dot--live' : 'dot'} />
                 PSX {status}
               </span>
             )}
 
-            <button
-              type="button"
-              className="btn btn--icon"
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-              title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
-            >
-              {theme === 'dark' ? <FiSun /> : <FiMoon />}
-            </button>
-
             <button type="button" className="btn" onClick={reload} title="Re-read the published data">
-              <FiRefreshCw aria-hidden="true" />
+              <IconReload aria-hidden="true" />
               <span className="hide-sm">Reload</span>
             </button>
 
@@ -177,15 +164,23 @@ export default function App() {
               onClick={() => setRefreshOpen(true)}
               title="Scrape the sources again, now"
             >
-              <FiZap aria-hidden="true" />
-              <span className="hide-sm">Refresh now</span>
+              <IconRefresh aria-hidden="true" />
+              <span className="hide-sm">Refresh</span>
             </button>
           </div>
         </header>
 
-        <main className="page" key={route}>
-          <Page nonce={nonce} onNavigate={go} />
-        </main>
+        {/* The landing page carries its own full-bleed rhythm, so it opts out
+            of the padded grid the data screens share. */}
+        {page.bare ? (
+          <main key={route}>
+            <Page nonce={nonce} onNavigate={go} />
+          </main>
+        ) : (
+          <main className="page" key={route}>
+            <Page nonce={nonce} onNavigate={go} />
+          </main>
+        )}
       </div>
 
       <RefreshPanel

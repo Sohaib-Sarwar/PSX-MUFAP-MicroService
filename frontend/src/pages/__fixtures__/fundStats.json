@@ -1,0 +1,45 @@
+{
+ "total_funds": 553,
+ "total_categories": 35,
+ "nav": {
+  "mean": 186.6356,
+  "median": 103.2285,
+  "min": 9.432,
+  "max": 3425.2013
+ },
+ "ytd_return": {
+  "mean": 5.27,
+  "best": 98.08,
+  "worst": -23.83,
+  "reported_by": 550,
+  "mixed_basis": true
+ },
+ "ytd_return_by_basis": {
+  "annualized": {
+   "mean": 9.96,
+   "best": 98.08,
+   "worst": -23.83,
+   "reported_by": 351
+  },
+  "absolute": {
+   "mean": -3.01,
+   "best": 11.41,
+   "worst": -19.81,
+   "reported_by": 199
+  }
+ },
+ "category_filter": null,
+ "freshness": {
+  "state": "fresh",
+  "data_as_of": "2026-09-25",
+  "fetched_at": "2026-09-27T02:43:30.221089+05:00",
+  "overdue_seconds": 0,
+  "on_schedule": true,
+  "published_at": "2026-09-27T05:41:19+05:00",
+  "age_seconds": 10668.9,
+  "stale_after_seconds": 146789,
+  "next_refresh_at": "2026-09-28T18:00:00+05:00",
+  "record_count": 553,
+  "schedule": "Hourly on working evenings at 18:00, 19:00, 20:00, 21:00, 22:00, 23:00 and 00:00 PKT."
+ }
+}

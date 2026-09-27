@@ -1,5 +1,8 @@
-import { FiChevronLeft, FiChevronRight } from 'react-icons/fi'
 import { Empty } from './ui'
+import {
+  IconCaretLeft,
+  IconCaretRight,
+} from '../lib/icons'
 
 /**
  * One sortable, paginated table for both domains.
@@ -54,7 +57,7 @@ export default function DataTable({
                     title={sortable ? `Sort by ${column.header}` : undefined}
                   >
                     {column.header}
-                    <span className="sort-mark" aria-hidden="true">
+                    <span className="mark" aria-hidden="true">
                       {active ? (sort.ascending ? '▲' : '▼') : ''}
                     </span>
                   </th>
@@ -98,7 +101,7 @@ export default function DataTable({
             onClick={page.previous}
             disabled={page.page === 0 || page.pages === 1}
           >
-            <FiChevronLeft aria-hidden="true" />
+            <IconCaretLeft aria-hidden="true" />
             Previous
           </button>
           <span className="num">
@@ -111,7 +114,7 @@ export default function DataTable({
             disabled={page.page >= page.pages - 1}
           >
             Next
-            <FiChevronRight aria-hidden="true" />
+            <IconCaretRight aria-hidden="true" />
           </button>
         </div>
       )}

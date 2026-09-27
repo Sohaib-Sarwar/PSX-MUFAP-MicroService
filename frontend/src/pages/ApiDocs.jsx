@@ -1,19 +1,19 @@
 import { useMemo, useState } from 'react'
 import {
-  FiBook,
-  FiChevronRight,
-  FiClock,
-  FiCode,
-  FiDatabase,
-  FiExternalLink,
-  FiGithub,
-  FiInfo,
-  FiPlay,
-  FiServer,
-  FiShield,
-  FiTerminal,
-} from 'react-icons/fi'
-import { Callout, Card, Copy, CodeBlock, Failed, Loading, Segmented } from '../components/ui'
+  IconApi,
+  IconBook,
+  IconCaretRight,
+  IconClock,
+  IconExternal,
+  IconInfo,
+  IconRecords,
+  IconRun,
+  IconServer,
+  IconShield,
+  IconSource,
+  IconTerminal,
+} from '../lib/icons'
+import { Code, Copy, Failed, Loading, Note, Panel, Segmented } from '../components/ui'
 import { API_BASE, IS_LIVE, REPO_URL, absoluteUrl } from '../lib/client'
 import { useData } from '../lib/hooks'
 import { int, moment } from '../lib/format'
@@ -97,7 +97,7 @@ print(funds.groupby("category")["returns.ytd"].mean().sort_values(ascending=Fals
 
   return (
     <div className="doc">
-      <section className="doc-hero">
+      <section className="doc-head">
         <h2>API reference</h2>
         <p>
           {catalog?.description ||
@@ -107,8 +107,8 @@ print(funds.groupby("category")["returns.ytd"].mean().sort_values(ascending=Fals
           nothing and costs the upstream exchanges nothing at all.
         </p>
 
-        <div className="url-bar">
-          <span className="method">GET</span>
+        <div className="url">
+          <span className="verb">GET</span>
           <code>{base}/…</code>
           <Copy text={base} label="Copy base" />
         </div>
@@ -135,18 +135,18 @@ print(funds.groupby("category")["returns.ytd"].mean().sort_values(ascending=Fals
         </dl>
       </section>
 
-      <Card
-        icon={FiTerminal}
+      <Panel
+        icon={IconTerminal}
         title="Quickstart"
-        subtitle="Four ways to pull the same data"
-        actions={
+        sub="Four ways to pull the same data"
+        end={
           <Segmented options={LANGUAGES} value={language} onChange={setLanguage} label="Language" />
         }
       >
-        <CodeBlock code={samples[language]} />
-      </Card>
+        <Code code={samples[language]} />
+      </Panel>
 
-      <Card icon={FiClock} title="Publication schedule" subtitle="When each dataset is refreshed">
+      <Panel icon={IconClock} title="Publication schedule" sub="When each dataset is refreshed">
         <div className="table-wrap" style={{ maxHeight: 'none' }}>
           <table className="fields">
             <thead>
@@ -171,26 +171,26 @@ print(funds.groupby("category")["returns.ytd"].mean().sort_values(ascending=Fals
         </div>
 
         <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
-          <Callout icon={FiInfo}>
+          <Note icon={IconInfo}>
             <strong>Why so infrequent?</strong> PSX publishes one closing board per trading day and
             MUFAP strikes NAV once per business day. Polling either of them faster cannot make the
             number newer — it only puts load on someone else's server. The MUFAP sweep additionally
             stops itself once the published validity date advances, so a normal evening costs one
             or two requests rather than seven.
-          </Callout>
-          <Callout icon={FiClock} variant="warn">
+          </Note>
+          <Note icon={IconClock} variant="warn">
             <strong>Scheduled runs can drift.</strong> GitHub queues cron-triggered workflows during
             busy periods, so a run may land several minutes late — and a public repository with no
             activity for 60 days has its schedules disabled altogether. Read{' '}
             <code>freshness.fetched_at</code> rather than assuming the clock.
-          </Callout>
+          </Note>
         </div>
-      </Card>
+      </Panel>
 
-      <Card
-        icon={FiShield}
+      <Panel
+        icon={IconShield}
         title="The freshness contract"
-        subtitle="Every response carries one of these"
+        sub="Every response carries one of these"
       >
         <p style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 12, maxWidth: '78ch' }}>
           A consumer should never have to infer staleness from a timestamp. Each response embeds a{' '}
@@ -214,12 +214,12 @@ print(funds.groupby("category")["returns.ytd"].mean().sort_values(ascending=Fals
             ))}
           </tbody>
         </table>
-      </Card>
+      </Panel>
 
-      <Card
-        icon={FiDatabase}
+      <Panel
+        icon={IconRecords}
         title="Endpoints"
-        subtitle={`${endpoints.length} published paths`}
+        sub={`${endpoints.length} published paths`}
         flush
       >
         <div style={{ padding: 14 }}>
@@ -232,16 +232,16 @@ print(funds.groupby("category")["returns.ytd"].mean().sort_values(ascending=Fals
             />
           ))}
         </div>
-      </Card>
+      </Panel>
 
-      <Card icon={FiServer} title="Running it yourself" subtitle="The same code, as a live service">
+      <Panel icon={IconServer} title="Running it yourself" sub="The same code, as a live service">
         <p style={{ fontSize: 12.5, color: 'var(--ink-2)', maxWidth: '78ch', marginBottom: 12 }}>
           The static files above are generated from the same pipeline that backs the HTTP service —
           identical parsers, identical validation gate, identical envelope. Run it as a server when
           you want query parameters, filtering and pagination handled for you rather than in your
           own code.
         </p>
-        <CodeBlock
+        <Code
           code={`git clone ${REPO_URL}.git
 cd PSX-MUFAP-MicroService
 
@@ -257,14 +257,14 @@ uvicorn app.main:app --reload`}
         />
         <div style={{ marginTop: 12 }}>
           <a className="btn" href={REPO_URL} target="_blank" rel="noreferrer noopener">
-            <FiGithub aria-hidden="true" />
+            <IconSource aria-hidden="true" />
             Source on GitHub
-            <FiExternalLink aria-hidden="true" />
+            <IconExternal aria-hidden="true" />
           </a>
         </div>
-      </Card>
+      </Panel>
 
-      <Card icon={FiBook} title="Attribution and terms">
+      <Panel icon={IconBook} title="Attribution and terms">
         <p style={{ fontSize: 12.5, color: 'var(--ink-2)', maxWidth: '78ch' }}>
           Data originates from the Pakistan Stock Exchange (<code>dps.psx.com.pk</code>) and the
           Mutual Funds Association of Pakistan (<code>mufap.com.pk</code>), fetched within what each
@@ -272,7 +272,7 @@ uvicorn app.main:app --reload`}
           not own it, does not warrant it, and is not investment advice. Verify anything you intend
           to trade on against the source.
         </p>
-      </Card>
+      </Panel>
     </div>
   )
 }
@@ -309,32 +309,32 @@ function Endpoint({ endpoint, base, schemas }) {
     <article className={open ? 'endpoint is-open' : 'endpoint'}>
       <button
         type="button"
-        className="endpoint-head"
+        className="ep-head"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <FiChevronRight className="endpoint-chevron" aria-hidden="true" />
-        <span className="method">GET</span>
-        <span className="endpoint-path">/{endpoint.path}</span>
-        <span className="endpoint-summary">{endpoint.summary}</span>
+        <IconCaretRight className="ep-caret" aria-hidden="true" />
+        <span className="verb">GET</span>
+        <span className="ep-path">/{endpoint.path}</span>
+        <span className="ep-sum">{endpoint.summary}</span>
       </button>
 
       {open && (
-        <div className="endpoint-body">
+        <div className="ep-body">
           <p>{endpoint.description}</p>
 
-          <div className="url-bar">
+          <div className="url">
             <code>{url}</code>
             <Copy text={url} label="Copy" />
           </div>
 
-          <div className="toolbar">
+          <div className="bar-tools">
             <button type="button" className="btn btn--sm btn--primary" onClick={tryIt}>
-              <FiPlay aria-hidden="true" />
+              <IconRun aria-hidden="true" />
               Try it
             </button>
             <a className="btn btn--sm" href={url} target="_blank" rel="noreferrer noopener">
-              <FiExternalLink aria-hidden="true" />
+              <IconExternal aria-hidden="true" />
               Open raw
             </a>
             {endpoint.records != null && (
@@ -346,19 +346,19 @@ function Endpoint({ endpoint, base, schemas }) {
 
           {preview?.status === 'loading' && <Loading rows={3} />}
           {preview?.status === 'error' && (
-            <Callout variant="warn">Could not fetch this endpoint. {preview.text}</Callout>
+            <Note variant="warn">Could not fetch this endpoint. {preview.text}</Note>
           )}
           {preview?.status === 'ready' && (
             <>
               <p className="muted" style={{ fontSize: 12 }}>
-                <FiCode
+                <IconApi
                   aria-hidden="true"
                   style={{ verticalAlign: '-2px', marginRight: 5, width: 13, height: 13 }}
                 />
                 Response shape
                 {preview.rows != null ? ` — ${int(preview.rows)} rows, first one shown` : ''}
               </p>
-              <CodeBlock code={preview.text} />
+              <Code code={preview.text} />
             </>
           )}
 

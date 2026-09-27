@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -82,6 +83,21 @@ def slugify(name: str) -> str:
 
 
 # ── schedule ──────────────────────────────────────────────────────────────────
+
+def representative_date(rows: list[dict[str, Any]]) -> str | None:
+    """The validity date that describes a batch of funds.
+
+    The date the most funds carry, ties breaking toward the newer one. See
+    `app.mufap.parsers.latest_validity`, which this mirrors so the snapshot and
+    the published envelope cannot disagree about what day the data is from.
+    """
+    dates = [r.get("validity_date") for r in rows if r.get("validity_date")]
+    if not dates:
+        return None
+    counts = Counter(dates)
+    top = max(counts.values())
+    return max(date for date, seen in counts.items() if seen == top)
+
 
 def next_run_after(moment: datetime, domain: str) -> datetime:
     """The next scheduled run strictly after `moment`, in UTC.
@@ -264,11 +280,25 @@ def shape_index(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# A price of zero is MUFAP declining to publish one, not a price. Pension and
+# VPS funds transact at NAV and quote no offer or repurchase; closed-end market
+# prices exist for three of 553 funds. Publishing 0.0 for the rest states, in a
+# field a consumer will multiply by a unit count, that the fund can be bought
+# for nothing — so those become null and the envelope says so.
+#
+# Loads are the opposite: 481 funds genuinely charge no front-end load, and a
+# null there would lose that. Zero stays zero.
+_ABSENT_WHEN_ZERO = ("offer_price", "repurchase_price", "market_price")
+
+
 def shape_fund(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     for field in ("nav", "offer_price", "repurchase_price", "market_price",
                   "front_end_load", "back_end_load", "contingent_load"):
         out[field] = rounded(out.get(field), 4)
+    for field in _ABSENT_WHEN_ZERO:
+        if not out.get(field):
+            out[field] = None
     out["returns"] = {k: rounded(v, 2) for k, v in (out.get("returns") or {}).items()}
     return out
 
@@ -287,6 +317,13 @@ def build_psx(writer: Writer, stocks: Dataset, indices: Dataset,
               session: Dataset) -> list[dict[str, Any]]:
     market_status = (stocks.meta or {}).get("market_status")
     summary = (stocks.meta or {}).get("summary") or {}
+    # Re-derived rather than trusted, so a snapshot written before this field
+    # existed still publishes it. See `app.psx.service._build_summary`.
+    quoted_changes = [r["change_pct"] for r in stocks.rows
+                      if r.get("has_quote") and r.get("change_pct") is not None]
+    summary["avg_change_pct_quoted"] = (
+        round(sum(quoted_changes) / len(quoted_changes), 2) if quoted_changes else None
+    )
     shaped = [shape_stock(r) for r in stocks.rows]
     catalog: list[dict[str, Any]] = []
 
@@ -572,8 +609,25 @@ def build_mufap(writer: Writer, funds: Dataset
                          "Every trustee institution with the number of funds it holds.",
                          records=len(trustees), schema="trustee"))
 
+    # Re-derived rather than trusted, so a snapshot written before the split
+    # existed still publishes it. See `app.mufap.service._build_stats`.
+    _by_basis: dict[str, list[float]] = {}
+    for _row in funds.rows:
+        _basis = _row.get("return_basis")
+        _ytd = (_row.get("returns") or {}).get("ytd")
+        if _basis and _ytd is not None:
+            _by_basis.setdefault(_basis, []).append(_ytd)
+    stats = dict(meta.get("stats") or {})
+    stats["ytd_return_by_basis"] = {
+        basis: {"mean": round(sum(v) / len(v), 2), "best": round(max(v), 2),
+                "worst": round(min(v), 2), "reported_by": len(v)}
+        for basis, v in _by_basis.items()
+    }
+    if isinstance(stats.get("ytd_return"), dict):
+        stats["ytd_return"] = {**stats["ytd_return"], "mixed_basis": True}
+
     writer.write("mufap/funds/stats.json",
-                 {**(meta.get("stats") or {}), "category_filter": None,
+                 {**stats, "category_filter": None,
                   "freshness": funds.freshness()})
     catalog.append(entry("mufap/funds/stats.json", "Aggregate statistics",
                          "Fund and category counts, and the mean, median, minimum and "
@@ -740,11 +794,12 @@ SCHEMAS: dict[str, dict[str, str]] = {
         "rating": "Stability or performance rating where one is published.",
         "benchmark": "The fund's stated benchmark.",
         "nav": "Net asset value per unit, to four decimals.",
-        "offer_price": "Price to buy a unit.",
-        "repurchase_price": "Price at which the fund buys a unit back.",
-        "front_end_load": "Sales load charged on purchase, in percent.",
-        "back_end_load": "Load charged on redemption, in percent.",
-        "contingent_load": "Contingent load where one applies.",
+        "offer_price": "Price to buy a unit, or null where MUFAP publishes none. Pension and VPS funds transact at NAV and quote no offer price; it is null rather than 0.0 so it is never multiplied by a unit count.",
+        "repurchase_price": "Price the fund buys a unit back at, or null where MUFAP publishes none.",
+        "market_price": "Last traded price, for the three listed closed-end funds. Null for the open-end majority, which do not trade on an exchange.",
+        "front_end_load": "Sales load charged on purchase, in percent. Zero is a real value here — most funds charge no front-end load — and is not treated as absent.",
+        "back_end_load": "Load charged on redemption, in percent. Zero is a real value.",
+        "contingent_load": "Contingent load where one applies, in percent. Zero is a real value.",
         "inception_date": "Fund launch date.",
         "validity_date": "The date this NAV is valid for. Funds do not all publish on the same day.",
         "return_basis": "How the fund reports returns — annualised or absolute.",
@@ -783,7 +838,8 @@ SCHEMAS: dict[str, dict[str, str]] = {
         "total_volume": "Shares traded across the market.",
         "total_traded_value": "Traded value in PKR.",
         "market_capitalisation": "Combined market cap of the published universe.",
-        "avg_change_pct": "Mean percentage move across the universe - derived here, not published by PSX.",
+        "avg_change_pct": "Mean percentage move across every listed instrument - derived here, not published by PSX. The screener prices rights letters and suspended issues whose last move can be -90%, so this carries a long tail no index reflects; prefer `avg_change_pct_quoted`.",
+        "avg_change_pct_quoted": "Mean percentage move across instruments carrying this session's own quote (`has_quote`). The figure to show a reader: it moves with the index, where `avg_change_pct` can disagree with it on direction.",
         "instruments_with_full_quote": "How many rows carry today's OHLC and volume.",
         "session_at": "The timestamp PSX stamped the board with.",
         "market_status": "`open` or `closed`, from the segment states.",
@@ -792,7 +848,8 @@ SCHEMAS: dict[str, dict[str, str]] = {
         "total_funds": "Funds in the snapshot.",
         "total_categories": "Distinct categories.",
         "nav": "Mean, median, minimum and maximum NAV.",
-        "ytd_return": "Mean, best and worst year-to-date return, and how many funds reported one.",
+        "ytd_return": "Mean, best and worst year-to-date return across every reporting fund, and how many reported one. `mixed_basis` is true because MUFAP quotes money-market and fixed-return plans on an annualized basis and the rest on an absolute one, so this mean averages two different kinds of number; prefer `ytd_return_by_basis`.",
+        "ytd_return_by_basis": "The same figures split by `return_basis`, so annualized yields and absolute returns are each summarised among comparable funds.",
     },
     "market_status": {
         "status": "`open`, `closed` or `unknown`.",
@@ -854,6 +911,15 @@ def main() -> int:
     del stocks, indices, session
 
     funds = Dataset("mufap.funds", "mufap", data_dir / "mufap.funds.json", now)
+    # Re-derived here rather than trusted from the snapshot.
+    #
+    # MUFAP quotes NAVs with a forward validity, so the newest date in a batch
+    # is routinely tomorrow and only a small minority of funds carry it. A
+    # snapshot written by an earlier build stored that maximum as the batch
+    # date, which published "data as of" a day that had not happened yet.
+    # Deriving it from the records present means the correction reaches the API
+    # on the next publish instead of waiting for the next scrape.
+    funds.data_as_of = representative_date(funds.rows) or funds.data_as_of
     mufap_catalog, shaped_funds = build_mufap(writer, funds)
     mufap_state = {"funds": funds.freshness()}
     funds_count = funds.count

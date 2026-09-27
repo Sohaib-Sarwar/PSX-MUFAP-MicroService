@@ -1,0 +1,420 @@
+{
+ "service": "PK Finance Unified Service",
+ "description": "Pakistan Stock Exchange and MUFAP mutual fund data, refreshed on a schedule by GitHub Actions and served as static JSON from GitHub Pages.",
+ "version": "6.0.0",
+ "base_url": "",
+ "published_at": "2026-09-27T05:41:19+05:00",
+ "transport": "Static JSON over HTTPS. GET only, no authentication, CORS open to every origin. Nothing is rate limited.",
+ "schedules": {
+  "psx": {
+   "cron": "0 12 * * 1-5",
+   "backstop_cron": "0 12-17 * * 1-5",
+   "weekdays": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "hours": [
+    12
+   ],
+   "minute": 0,
+   "human": "Once per working day at 17:00 PKT, after the PSX close.",
+   "grace_minutes": 180
+  },
+  "mufap": {
+   "cron": "0 13-19 * * 1-5",
+   "backstop_cron": "0,30 13-19 * * 1-5",
+   "weekdays": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "hours": [
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+   ],
+   "minute": 0,
+   "human": "Hourly on working evenings at 18:00, 19:00, 20:00, 21:00, 22:00, 23:00 and 00:00 PKT.",
+   "grace_minutes": 90
+  }
+ },
+ "datasets": {
+  "psx.stocks": 747,
+  "psx.indices": 18,
+  "mufap.funds": 553
+ },
+ "freshness_fields": {
+  "state": "`fresh`, `stale`, `degraded` or `unavailable`.",
+  "data_as_of": "What the source says the data is from \u2014 the last trade timestamp for PSX, the NAV validity date for MUFAP. This is the number that matters.",
+  "fetched_at": "When this service fetched it.",
+  "published_at": "When this file was built.",
+  "age_seconds": "Age at publish time. A static file cannot tick \u2014 recompute from `fetched_at` for the age right now.",
+  "stale_after_seconds": "Age, measured from `fetched_at`, past which the data should be treated as stale. Derived from the schedule, so it already accounts for weekends.",
+  "next_refresh_at": "When the next scheduled run is due, in PKT.",
+  "overdue_seconds": "How far past its deadline this dataset is; 0 when on schedule. Alarm on this.",
+  "on_schedule": "`false` once `overdue_seconds` is above zero \u2014 the refresh that should have happened has not.",
+  "record_count": "Rows in the underlying snapshot.",
+  "error": "Present only when the last refresh failed. The data shown is the previous good snapshot."
+ },
+ "schemas": {
+  "stock": {
+   "symbol": "Ticker as PSX lists it, e.g. `OGDC`. Lower-cased it is also the path of the instrument's own endpoint.",
+   "name": "Registered company name.",
+   "sector": "PSX sector classification, resolved from the sector code.",
+   "sector_code": "PSX's four-digit sector code.",
+   "indices": "Every index the instrument belongs to. Each is addressable as `psx/indices/{name}.json`.",
+   "flags": "Market-state badges PSX prints beside the ticker: `NC` non-compliant, `XD` ex-dividend.",
+   "current": "Last price the screener published.",
+   "change": "Absolute move, derived exactly from `current` and `change_pct`.",
+   "change_pct": "Percentage move on the session.",
+   "change_1y_pct": "Percentage move over twelve months.",
+   "market_cap": "Market capitalisation in PKR.",
+   "pe_ratio": "Trailing twelve-month price/earnings.",
+   "dividend_yield": "Trailing dividend yield, in percent.",
+   "free_float": "Free-float shares.",
+   "volume_30d_avg": "Average daily volume over 30 days.",
+   "has_quote": "Whether this row carries today's OHLC and session volume. PSX withdrew the bulk quote feed on 2026-09-24, so those are fetched per instrument for a bounded set; see `psx/stocks/quoted.json`.",
+   "ldcp": "Last day closing price. Only where `has_quote` is true.",
+   "open": "Session opening price. Only where `has_quote` is true.",
+   "high": "Session high. Only where `has_quote` is true.",
+   "low": "Session low. Only where `has_quote` is true.",
+   "volume": "Shares traded in the session. Only where `has_quote` is true.",
+   "traded": "Kept for consumers written against the older shape. It now means the instrument is priced in the screener - it is NOT a claim that it traded today. Use `psx/stocks/summary.json` for the exchange's own traded count.",
+   "is_etf": "Exchange-traded fund. Carried forward from before PSX withdrew the classification feed.",
+   "is_debt": "Debt instrument rather than equity. Carried forward likewise."
+  },
+  "segment": {
+   "market": "Market segment, e.g. Regular, Deliverable Futures, Bills & Bonds.",
+   "state": "`Open` or `Closed`, as the exchange reports it.",
+   "trades": "Trades executed in the segment.",
+   "volume": "Shares or units traded.",
+   "value": "Traded value in PKR."
+  },
+  "rating": {
+   "rating": "Stability or performance rating.",
+   "count": "Funds carrying it."
+  },
+  "trustee": {
+   "trustee": "Trustee institution.",
+   "count": "Funds it holds."
+  },
+  "poll": {
+   "published_at": "When this file was written.",
+   "datasets": "One entry per dataset, each carrying `state`, `fetched_at`, `data_as_of`, `stale_after_seconds`, `next_refresh_at`, `record_count`, `overdue_seconds` and `on_schedule`."
+  },
+  "index": {
+   "index_name": "Index name, e.g. `KSE100`.",
+   "current": "Current index level.",
+   "high": "Session high.",
+   "low": "Session low.",
+   "change": "Absolute move.",
+   "change_pct": "Percentage move."
+  },
+  "fund": {
+   "fund_name": "Fund name exactly as MUFAP publishes it.",
+   "slug": "URL segment addressing this fund's own endpoint, `mufap/fund/{slug}.json`.",
+   "category": "MUFAP category, e.g. `Money Market`, `Equity`.",
+   "sector": "Conventional or Shariah-compliant.",
+   "amc": "Asset management company.",
+   "trustee": "Trustee institution.",
+   "rating": "Stability or performance rating where one is published.",
+   "benchmark": "The fund's stated benchmark.",
+   "nav": "Net asset value per unit, to four decimals.",
+   "offer_price": "Price to buy a unit, or null where MUFAP publishes none. Pension and VPS funds transact at NAV and quote no offer price; it is null rather than 0.0 so it is never multiplied by a unit count.",
+   "repurchase_price": "Price the fund buys a unit back at, or null where MUFAP publishes none.",
+   "market_price": "Last traded price, for the three listed closed-end funds. Null for the open-end majority, which do not trade on an exchange.",
+   "front_end_load": "Sales load charged on purchase, in percent. Zero is a real value here \u2014 most funds charge no front-end load \u2014 and is not treated as absent.",
+   "back_end_load": "Load charged on redemption, in percent. Zero is a real value.",
+   "contingent_load": "Contingent load where one applies, in percent. Zero is a real value.",
+   "inception_date": "Fund launch date.",
+   "validity_date": "The date this NAV is valid for. Funds do not all publish on the same day.",
+   "return_basis": "How the fund reports returns \u2014 annualised or absolute.",
+   "returns": "Object keyed by period: `ytd`, `mtd`, `d1`, `d15`, `d30`, `d90`, `d180`, `d270`, `d365`, `y2`, `y3`."
+  },
+  "sector": {
+   "sector": "Sector name.",
+   "slug": "URL segment for its own endpoint.",
+   "instruments": "Instruments classified into the sector.",
+   "gainers": "How many are up on the session.",
+   "losers": "How many are down.",
+   "unchanged": "How many are flat.",
+   "market_cap": "Combined market capitalisation, PKR.",
+   "avg_change_pct": "Mean percentage move across the sector."
+  },
+  "search": {
+   "type": "`stock` or `fund`.",
+   "id": "PSX ticker, or the fund name exactly as MUFAP publishes it.",
+   "label": "Human-readable name to display.",
+   "group": "Sector for a stock, category for a fund.",
+   "issuer": "Asset management company. Funds only.",
+   "active": "The instrument is priced, or the fund published a NAV.",
+   "endpoint": "The path holding this record on its own, e.g. `psx/stocks/ogdc.json`."
+  },
+  "category": {
+   "category": "Category name.",
+   "slug": "URL segment for its own endpoint.",
+   "count": "Funds in it."
+  },
+  "amc": {
+   "amc": "Company name.",
+   "slug": "URL segment for its own endpoint.",
+   "count": "Funds it manages.",
+   "categories": "Categories it operates in."
+  },
+  "summary": {
+   "listed_instruments": "Instruments in the published universe.",
+   "traded_instruments": "How many actually traded, from the exchange's session header.",
+   "gainers": "Advancers, from the exchange.",
+   "losers": "Decliners, from the exchange.",
+   "unchanged": "Closed flat, from the exchange.",
+   "total_trades": "Trades executed across the market.",
+   "total_volume": "Shares traded across the market.",
+   "total_traded_value": "Traded value in PKR.",
+   "market_capitalisation": "Combined market cap of the published universe.",
+   "avg_change_pct": "Mean percentage move across every listed instrument - derived here, not published by PSX. The screener prices rights letters and suspended issues whose last move can be -90%, so this carries a long tail no index reflects; prefer `avg_change_pct_quoted`.",
+   "avg_change_pct_quoted": "Mean percentage move across instruments carrying this session's own quote (`has_quote`). The figure to show a reader: it moves with the index, where `avg_change_pct` can disagree with it on direction.",
+   "instruments_with_full_quote": "How many rows carry today's OHLC and volume.",
+   "session_at": "The timestamp PSX stamped the board with.",
+   "market_status": "`open` or `closed`, from the segment states."
+  },
+  "stats": {
+   "total_funds": "Funds in the snapshot.",
+   "total_categories": "Distinct categories.",
+   "nav": "Mean, median, minimum and maximum NAV.",
+   "ytd_return": "Mean, best and worst year-to-date return across every reporting fund, and how many reported one. `mixed_basis` is true because MUFAP quotes money-market and fixed-return plans on an annualized basis and the rest on an absolute one, so this mean averages two different kinds of number; prefer `ytd_return_by_basis`.",
+   "ytd_return_by_basis": "The same figures split by `return_basis`, so annualized yields and absolute returns are each summarised among comparable funds."
+  },
+  "market_status": {
+   "status": "`open`, `closed` or `unknown`.",
+   "last_tick": "Timestamp of the newest tick seen in the KSE100 intraday series."
+  }
+ },
+ "endpoints": [
+  {
+   "path": "index.json",
+   "summary": "This catalog",
+   "description": "Every endpoint, every field, and the publication schedule. The dashboard's API reference is rendered from this file, so the documentation cannot drift from what is actually published.",
+   "records": null,
+   "schema": "catalog"
+  },
+  {
+   "path": "freshness.json",
+   "summary": "Fetch times for every dataset",
+   "description": "Under a kilobyte: when each dataset was last fetched, what the source dates it, when the next run is due and how many records it holds \u2014 and nothing else. Poll this rather than re-downloading a dataset to find out whether it changed.",
+   "records": null,
+   "schema": "poll"
+  },
+  {
+   "path": "search.json",
+   "summary": "Search index for both domains",
+   "description": "Identifier, label and grouping for every instrument and every fund in one file, with no prices or returns. A static host cannot answer a `?q=` parameter, so this is what it publishes instead: enough to match locally, plus an `endpoints` map to the files holding the full records. 224 KB raw, about 22 KB gzipped.",
+   "records": 1300,
+   "schema": "search"
+  },
+  {
+   "path": "psx/stocks.json",
+   "summary": "Every listed instrument",
+   "description": "The full PSX universe with price, percentage move, market capitalisation, P/E, dividend yield, free float, 30-day average volume and index memberships. Ordered by market cap. `has_quote` tells you whether today's OHLC and session volume are present for that row.",
+   "records": 747,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/{symbol}.json",
+   "summary": "One instrument",
+   "description": "A single instrument by lower-case ticker, e.g. `psx/stocks/ogdc.json`. Around 700 bytes instead of the full 747-row file.",
+   "records": 1,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/summary.json",
+   "summary": "Market breadth and totals",
+   "description": "Advancing, declining and unchanged counts, total trades, exchange volume and value \u2014 taken from the exchange's own session header rather than counted from the universe.",
+   "records": null,
+   "schema": "summary"
+  },
+  {
+   "path": "psx/stocks/quoted.json",
+   "summary": "Instruments with a full quote",
+   "description": "Only the rows carrying today's LDCP, open, high, low and session volume. PSX withdrew the bulk quote feed, so these are fetched per instrument and the set is bounded.",
+   "records": 120,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/gainers.json",
+   "summary": "Top gainers",
+   "description": "Instruments up on the session, by percentage gain.",
+   "records": 50,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/losers.json",
+   "summary": "Top losers",
+   "description": "Instruments down on the session, by percentage loss.",
+   "records": 50,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/active.json",
+   "summary": "Most active by 30-day average volume",
+   "description": "Ordered by 30-day average volume, which is what the screener publishes now that per-session volume is no longer served in bulk.",
+   "records": 50,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/top/market-cap.json",
+   "summary": "Largest by market capitalisation",
+   "description": "The biggest listed companies by market value.",
+   "records": 50,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/top/dividend-yield.json",
+   "summary": "Highest dividend yield",
+   "description": "Highest trailing dividend yield, in percent.",
+   "records": 50,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/top/pe-ratio.json",
+   "summary": "Lowest price/earnings",
+   "description": "Lowest positive trailing P/E. Instruments with no earnings are excluded.",
+   "records": 50,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/stocks/top/yearly-gainers.json",
+   "summary": "Best twelve months",
+   "description": "Largest one-year percentage gain.",
+   "records": 50,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/sectors.json",
+   "summary": "Sector breadth",
+   "description": "Per-sector counts, advancers and decliners, combined market capitalisation and average move. Each row carries the `slug` that addresses its own endpoint below.",
+   "records": 38,
+   "schema": "sector"
+  },
+  {
+   "path": "psx/sectors/{slug}.json",
+   "summary": "Instruments in one sector",
+   "description": "Every instrument in a single sector, largest first. `{slug}` comes from `psx/sectors.json` \u2014 there are 38, e.g. `commercial-banks`.",
+   "records": null,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/indices.json",
+   "summary": "Index board",
+   "description": "KSE100, KSE30, KMI30, ALLSHR and the rest, with session high, low and change for each.",
+   "records": 18,
+   "schema": "index"
+  },
+  {
+   "path": "psx/indices/{name}.json",
+   "summary": "Constituents of one index",
+   "description": "Every instrument that belongs to an index, largest first. 17 indices are addressable this way, e.g. `psx/indices/kse100.json`.",
+   "records": null,
+   "schema": "stock"
+  },
+  {
+   "path": "psx/market-status.json",
+   "summary": "Trading status",
+   "description": "Whether PSX was trading when the snapshot was taken, with the state of each market segment. Taken from the exchange's own panel, not inferred from a clock.",
+   "records": null,
+   "schema": "market_status"
+  },
+  {
+   "path": "psx/session.json",
+   "summary": "Session totals by market segment",
+   "description": "Trades, volume and value for Regular, Futures, Bills & Bonds and every other segment, plus the exchange-wide totals and the timestamp PSX stamped the board with.",
+   "records": 14,
+   "schema": "segment"
+  },
+  {
+   "path": "mufap/funds.json",
+   "summary": "Every fund",
+   "description": "The whole MUFAP daily statistics table: NAV, offer and repurchase prices, sales loads, rating, trustee, AMC and eleven return periods per fund. Sorted by name.",
+   "records": 553,
+   "schema": "fund"
+  },
+  {
+   "path": "mufap/funds/categories.json",
+   "summary": "Categories",
+   "description": "Every fund category with the number of funds in it. Each row carries the `slug` that addresses its own endpoint below.",
+   "records": 35,
+   "schema": "category"
+  },
+  {
+   "path": "mufap/funds/category/{slug}.json",
+   "summary": "Funds in one category",
+   "description": "Every fund in a single category. `{slug}` comes from the `slug` field in `mufap/funds/categories.json` \u2014 there are 35 of them, e.g. `aggressive-fixed-income`.",
+   "records": null,
+   "schema": "fund"
+  },
+  {
+   "path": "mufap/fund/{slug}.json",
+   "summary": "One fund",
+   "description": "A single fund by slug, e.g. `mufap/fund/786-islamic-money-market-fund.json`. The slug is on every row of `mufap/funds.json` and of the search index.",
+   "records": 1,
+   "schema": "fund"
+  },
+  {
+   "path": "mufap/funds/amcs.json",
+   "summary": "Asset management companies",
+   "description": "Every AMC with its fund count, the categories it operates in, and the `slug` addressing its own endpoint below.",
+   "records": 25,
+   "schema": "amc"
+  },
+  {
+   "path": "mufap/funds/amc/{slug}.json",
+   "summary": "Funds from one AMC",
+   "description": "Every fund managed by a single company. `{slug}` comes from `mufap/funds/amcs.json` \u2014 25 of them.",
+   "records": null,
+   "schema": "fund"
+  },
+  {
+   "path": "mufap/funds/ratings.json",
+   "summary": "Stability ratings",
+   "description": "Every published rating with the number of funds carrying it.",
+   "records": 6,
+   "schema": "rating"
+  },
+  {
+   "path": "mufap/funds/trustees.json",
+   "summary": "Trustees",
+   "description": "Every trustee institution with the number of funds it holds.",
+   "records": 2,
+   "schema": "trustee"
+  },
+  {
+   "path": "mufap/funds/stats.json",
+   "summary": "Aggregate statistics",
+   "description": "Fund and category counts, and the mean, median, minimum and maximum NAV and year-to-date return across the industry.",
+   "records": null,
+   "schema": "stats"
+  },
+  {
+   "path": "mufap/funds/bottom/{period}.json",
+   "summary": "Worst performers",
+   "description": "The weakest funds over one return period, same periods as above.",
+   "records": 50,
+   "schema": "fund"
+  },
+  {
+   "path": "mufap/funds/top/{period}.json",
+   "summary": "Best performers",
+   "description": "The strongest funds over one return period. `{period}` is one of: ytd, mtd, d1, d15, d30, d90, d180, d270, d365, y2, y3.",
+   "records": 50,
+   "schema": "fund"
+  }
+ ]
+}

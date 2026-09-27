@@ -1,0 +1,118 @@
+{
+ "status": "closed",
+ "session_at": "2026-09-25T18:47:00+05:00",
+ "segments": [
+  {
+   "market": "Regular",
+   "state": "Closed",
+   "trades": 291831,
+   "volume": 482758737,
+   "value": 19283841832.0
+  },
+  {
+   "market": "Bills & Bonds",
+   "state": "Closed",
+   "trades": 29,
+   "volume": 12550200000,
+   "value": 12469704908.0
+  },
+  {
+   "market": "DELIVERABLE FUTURES",
+   "state": "Closed",
+   "trades": 137837,
+   "volume": 687873000,
+   "value": 27170621570.0
+  },
+  {
+   "market": "Cash Settled Futures",
+   "state": "Closed",
+   "trades": 0,
+   "volume": 0,
+   "value": 0.0
+  },
+  {
+   "market": "Odd Lot",
+   "state": "Closed",
+   "trades": 39,
+   "volume": 723,
+   "value": 20340.0
+  },
+  {
+   "market": "Square Up",
+   "state": "Closed",
+   "trades": 0,
+   "volume": 0,
+   "value": 0.0
+  },
+  {
+   "market": "Stock Index Futures",
+   "state": "Closed",
+   "trades": 0,
+   "volume": 0,
+   "value": 0.0
+  },
+  {
+   "market": "Negotiable Deal",
+   "state": "Closed",
+   "trades": 39,
+   "volume": 16620214,
+   "value": 505474923.0
+  },
+  {
+   "market": "Margin Trading System",
+   "state": "Suspended",
+   "trades": 1037,
+   "volume": 23213416,
+   "value": 323398956.0
+  },
+  {
+   "market": "Regular",
+   "state": "Closed",
+   "trades": 5,
+   "volume": 1421,
+   "value": 65763.0
+  },
+  {
+   "market": "Odd Lot",
+   "state": "Closed",
+   "trades": 0,
+   "volume": 0,
+   "value": 0.0
+  },
+  {
+   "market": "DELIVERABLE FUTURES",
+   "state": "Closed",
+   "trades": 0,
+   "volume": 0,
+   "value": 0.0
+  },
+  {
+   "market": "Square Up",
+   "state": "Closed",
+   "trades": 0,
+   "volume": 0,
+   "value": 0.0
+  },
+  {
+   "market": "Cash Settled Futures",
+   "state": "Closed",
+   "trades": 0,
+   "volume": 0,
+   "value": 0.0
+  }
+ ],
+ "freshness": {
+  "state": "fresh",
+  "data_as_of": "2026-09-25T18:47:00+05:00",
+  "fetched_at": "2026-09-27T01:57:58.729782+05:00",
+  "overdue_seconds": 0,
+  "on_schedule": true,
+  "published_at": "2026-09-27T05:41:19+05:00",
+  "age_seconds": 13400.3,
+  "stale_after_seconds": 151321,
+  "next_refresh_at": "2026-09-28T17:00:00+05:00",
+  "record_count": 747,
+  "schedule": "Once per working day at 17:00 PKT, after the PSX close.",
+  "market_status": "closed"
+ }
+}

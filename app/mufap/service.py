@@ -142,6 +142,21 @@ def _median(values: list[float]) -> float | None:
     return (ordered[mid - 1] + ordered[mid]) / 2
 
 
+def _ytd_by_basis(rows: list[dict[str, Any]]) -> dict[str, list[float]]:
+    """Year-to-date returns grouped by the basis MUFAP quoted them on.
+
+    Funds that do not declare a basis are left out rather than guessed into a
+    bucket — a wrong bucket is worse here than a smaller sample.
+    """
+    grouped: dict[str, list[float]] = {}
+    for row in rows:
+        basis = row.get("return_basis")
+        value = (row.get("returns") or {}).get("ytd")
+        if basis and value is not None:
+            grouped.setdefault(basis, []).append(value)
+    return grouped
+
+
 def _build_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
     navs = [r["nav"] for r in rows if r.get("nav") is not None]
     ytd = [r["returns"]["ytd"] for r in rows
@@ -155,11 +170,30 @@ def _build_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "min": round(min(navs), 4) if navs else None,
             "max": round(max(navs), 4) if navs else None,
         },
+        # Kept whole for consumers already reading it, but see the warning on
+        # `ytd_return.mixed_basis` before putting this in front of a reader.
         "ytd_return": {
             "mean": round(sum(ytd) / len(ytd), 2) if ytd else None,
             "best": round(max(ytd), 2) if ytd else None,
             "worst": round(min(ytd), 2) if ytd else None,
             "reported_by": len(ytd),
+            "mixed_basis": True,
+        },
+        # MUFAP reports two kinds of number under one heading. Money-market and
+        # fixed-return plans publish an *annualized* yield, equity and
+        # allocation funds publish the *absolute* change. Averaging the two
+        # together is not an average of anything: on 2026-09-27 it blended 354
+        # annualized yields with 199 absolute returns, and the best-of ran to
+        # +98.08% because a fixed-return plan three months old annualizes to
+        # that. Split, each side is a statistic about comparable funds.
+        "ytd_return_by_basis": {
+            basis: {
+                "mean": round(sum(values) / len(values), 2),
+                "best": round(max(values), 2),
+                "worst": round(min(values), 2),
+                "reported_by": len(values),
+            }
+            for basis, values in _ytd_by_basis(rows).items()
         },
     }
 
