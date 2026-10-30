@@ -14,7 +14,9 @@ name: MUFAP — evening NAV
 
 on:
   schedule:
-    - cron: '0,30 13-19 * * 1-5'
+    # :11 and :41 rather than :00 and :30 — see the note in scrape-psx.yml.
+    # The top and the half hour are the two slots GitHub drops most often.
+    - cron: '11,41 13-19 * * 1-5'
   workflow_dispatch:
     inputs:
       force:

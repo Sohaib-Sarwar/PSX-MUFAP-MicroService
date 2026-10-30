@@ -183,15 +183,26 @@ class Dataset:
         # lateness should not have to reimplement the schedule to do it.
         overdue_by = max(0.0, (self.now - deadline).total_seconds()) if fetched else None
 
+        # Everything derived from "now" is frozen the moment this file is
+        # written, and a static file cannot tick. Hours later `state` still
+        # says what was true at the build, which is how this envelope came to
+        # carry `overdue_seconds: 0` and `on_schedule: true` on a dataset that
+        # was five hours past its own `next_refresh_at`.
+        #
+        # They stay, because consumers read them and they are correct at
+        # publication — but `computed_at` now says when they were true, and
+        # `stale_at` gives the one absolute a consumer needs: compare it to
+        # your own clock and you have the live answer, with no schedule to
+        # reimplement and nothing to recompute.
         envelope: dict[str, Any] = {
             "state": state,
             "data_as_of": self.data_as_of,
             "fetched_at": self.fetched_at,
+            "stale_at": deadline.astimezone(PKT).isoformat(timespec="seconds") if fetched else None,
+            "computed_at": self.now.astimezone(PKT).isoformat(timespec="seconds"),
             "overdue_seconds": round(overdue_by) if overdue_by is not None else None,
             "on_schedule": (overdue_by == 0.0) if overdue_by is not None else None,
             "published_at": self.now.astimezone(PKT).isoformat(timespec="seconds"),
-            # Measured at publish time. A static file cannot tick, so recompute
-            # from `fetched_at` if you need the age right now.
             "age_seconds": round(age, 1) if age is not None else None,
             "stale_after_seconds": stale_after,
             "next_refresh_at": due.astimezone(PKT).isoformat(timespec="seconds"),
@@ -858,17 +869,19 @@ SCHEMAS: dict[str, dict[str, str]] = {
 }
 
 FRESHNESS_FIELDS = {
-    "state": "`fresh`, `stale`, `degraded` or `unavailable`.",
+    "state": "`fresh`, `stale`, `degraded` or `unavailable`, **as of `computed_at`**. This is a static file and cannot tick, so do not read it as a live verdict — compare `stale_at` to your own clock instead.",
     "data_as_of": "What the source says the data is from — the last trade timestamp for PSX, the NAV validity date for MUFAP. This is the number that matters.",
     "fetched_at": "When this service fetched it.",
+    "stale_at": "The instant this data stops being current, in PKT. **The field to monitor.** It is absolute, so `now > stale_at` is the whole liveness check — no schedule to reimplement, nothing to recompute, and unlike `state` it does not go out of date sitting in a CDN.",
+    "computed_at": "When the derived fields below were evaluated. `state`, `overdue_seconds`, `on_schedule` and `age_seconds` describe this instant and not the one you are reading them at.",
     "published_at": "When this file was built.",
-    "age_seconds": "Age at publish time. A static file cannot tick — recompute from `fetched_at` for the age right now.",
+    "age_seconds": "Age at `computed_at`. Recompute from `fetched_at` for the age right now.",
     "stale_after_seconds": "Age, measured from `fetched_at`, past which the data should be treated as stale. Derived from the schedule, so it already accounts for weekends.",
     "next_refresh_at": "When the next scheduled run is due, in PKT.",
-    "overdue_seconds": "How far past its deadline this dataset is; 0 when on schedule. Alarm on this.",
-    "on_schedule": "`false` once `overdue_seconds` is above zero — the refresh that should have happened has not.",
+    "overdue_seconds": "How far past its deadline this dataset was at `computed_at`; 0 when on schedule. Frozen — alarm on `stale_at`, not on this.",
+    "on_schedule": "`false` once `overdue_seconds` is above zero. Frozen at `computed_at`, like the rest of the derived fields.",
     "record_count": "Rows in the underlying snapshot.",
-    "error": "Present only when the last refresh failed. The data shown is the previous good snapshot.",
+    "error": "Present only when the last refresh failed. The data shown is the previous good snapshot, and the message says what the source did — which is the difference between a run that never happened and a run the source refused.",
 }
 
 
@@ -934,14 +947,21 @@ def main() -> int:
     # The endpoint a production consumer polls. Everything else is measured in
     # hundreds of kilobytes; this is under a kilobyte and answers the only
     # question a poller has: is there anything new, and how old is what I hold.
-    POLL_FIELDS = ("state", "fetched_at", "data_as_of", "stale_after_seconds",
-                   "next_refresh_at", "record_count", "overdue_seconds",
-                   "on_schedule")
+    # `stale_at` and `error` are here because this is the file a monitor polls,
+    # and without them it cannot tell "nothing ran" from "the source refused" —
+    # which need opposite responses. `state` and `overdue_seconds` are frozen at
+    # `computed_at`; compare `stale_at` to your own clock for the live answer.
+    POLL_FIELDS = ("state", "fetched_at", "data_as_of", "stale_at", "computed_at",
+                   "stale_after_seconds", "next_refresh_at", "record_count",
+                   "overdue_seconds", "on_schedule", "error")
     poll_datasets: dict[str, Any] = {}
     for domain, states in (("psx", psx_state), ("mufap", mufap_state)):
         for name, state in states.items():
             poll_datasets[f"{domain}.{name}"] = {
                 field: state.get(field) for field in POLL_FIELDS
+                # `error` is absent on a healthy dataset; carrying a null for
+                # every one of them doubles this file for nothing.
+                if field != "error" or state.get("error")
             }
     writer.write("freshness.json", {
         "published_at": now.isoformat(timespec="seconds"),

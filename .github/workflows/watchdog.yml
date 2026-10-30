@@ -1,0 +1,133 @@
+name: Watchdog
+
+# The layer that was missing on 2026-10-30.
+#
+# That day the service served a five-hour-old board and a two-day-old fund
+# snapshot while every workflow run in the repository reported success, because
+# a run that keeps the previous snapshot when a fetch fails is succeeding at
+# what it was asked to do. Both trigger paths had failed at once — the
+# Cloudflare cron stopped firing after 2026-10-29T19:00Z and GitHub's schedule
+# delivered nothing at all that day — and nothing noticed for twenty-two hours.
+#
+# This watches the published data rather than the runs, which is the only
+# vantage point from which "the trigger is dead" is visible. It is deliberately
+# independent of the Cloudflare worker, so the two cannot fail for the same
+# reason: the worker's cron failing is precisely what this exists to catch.
+#
+# Minutes are off the hour on purpose. GitHub's scheduler is most congested at
+# :00 and drops the most fires there; every cron in this repository used to ask
+# for :00 and :30, the two worst slots.
+
+on:
+  schedule:
+    - cron: '13,43 * * * *'
+  workflow_dispatch:
+
+# Never more than one in flight. A backlog of watchdogs all filing the same
+# finding is its own kind of noise.
+concurrency:
+  group: watchdog
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  check:
+    name: Is the data as recent as it promises
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Fetch the watchdog
+        uses: actions/checkout@v5
+        with:
+          # Only the one script. A full checkout to run a 200-line
+          # standard-library file is most of this job's wall clock.
+          sparse-checkout: .github/scripts/watchdog.py
+          sparse-checkout-cone-mode: false
+
+      - name: Read the published freshness
+        id: check
+        env:
+          SITE_URL: https://sohaib-sarwar.github.io/PSX-MUFAP-MicroService
+        # The runner's preinstalled python, no setup-python and no pip: this
+        # has to be able to run when everything else is broken.
+        run: python3 .github/scripts/watchdog.py
+
+      # ── repair ────────────────────────────────────────────────────────────
+      # Only for `late`, which means no fetch was attempted. `blocked` means
+      # the source refused one, and asking again is just more requests at a
+      # host that has already said no.
+      - name: Ask for the missing run
+        if: steps.check.outputs.late != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATE: ${{ steps.check.outputs.late }}
+        run: |
+          set -euo pipefail
+          for domain in ${LATE//,/ }; do
+            case "$domain" in
+              psx)   workflow=scrape-psx.yml ;;
+              mufap) workflow=scrape-mufap.yml ;;
+              *)     echo "::warning::unknown domain '$domain'"; continue ;;
+            esac
+            echo "dispatching $workflow"
+            # `force` because the scrape's own interval guard is what a late
+            # run has to get past — the point is that the interval elapsed and
+            # nothing ran.
+            gh workflow run "$workflow" --ref "${{ github.ref_name }}" -f force=true \
+              || echo "::warning::could not dispatch $workflow"
+          done
+
+      # ── alert ─────────────────────────────────────────────────────────────
+      # One open issue per incident. Opening it emails whoever watches the
+      # repository; subsequent checks edit that issue in place rather than
+      # commenting, so a long outage produces one notification and not one an
+      # hour. Recovery comments once and closes.
+      - name: Raise or update the alert
+        if: steps.check.outputs.healthy != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ${{ steps.check.outputs.report }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title='Data is not arriving on schedule'
+
+          # printf rather than a quoted multi-line string: indenting the
+          # continuation lines to match this YAML would put ten spaces at the
+          # start of each, and Markdown renders an indented line as code.
+          footer='Detected by the [watchdog](%s). This issue is edited in place while the problem persists, and closed automatically once every dataset is back within its refresh window.\n'
+          body=$(printf "%s\n\n---\n\n${footer}" "$REPORT" "$RUN_URL")
+
+          existing=$(gh issue list --label watchdog --state open \
+            --json number --jq '.[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            echo "updating issue #$existing"
+            gh issue edit "$existing" --body "$body"
+          else
+            echo "opening a new issue"
+            gh label create watchdog --color b60205 \
+              --description 'Raised automatically when published data goes stale' \
+              2>/dev/null || true
+            gh issue create --title "$title" --label watchdog --body "$body"
+          fi
+
+      - name: Close the alert
+        if: steps.check.outputs.healthy == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ${{ steps.check.outputs.report }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --label watchdog --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$(printf 'Recovered.\n\n%s\n' "$REPORT")"
+            gh issue close "$existing"
+          else
+            echo "healthy, and nothing was open"
+          fi

@@ -12,7 +12,11 @@ name: PSX — daily close
 
 on:
   schedule:
-    - cron: '0 12-17 * * 1-5'
+    # :17, not :00. GitHub's scheduler is most congested at the top of the
+    # hour, because that is where almost every cron in the world asks to be,
+    # and congestion is exactly how a fire gets dropped or delivered hours
+    # late. Every cron in this repository used to ask for :00 or :30.
+    - cron: '17 12-17 * * 1-5'
   workflow_dispatch:
     inputs:
       force:
