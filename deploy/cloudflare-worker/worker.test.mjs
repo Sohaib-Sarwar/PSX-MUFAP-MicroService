@@ -9,9 +9,11 @@
  *   applyThrottle  when a refresh is refused as redundant, which is the only
  *                  thing standing between an open endpoint and an abusive
  *                  number of scrapes of someone else's website
+ *   overdueDomains which domains a fire sweeps up for a fire that never
+ *                  happened — and, more importantly, which it leaves alone
  */
 import assert from 'node:assert/strict'
-import { applyThrottle, domainFor } from './worker.js'
+import { applyThrottle, domainFor, overdueDomains } from './worker.js'
 
 const at = (iso) => new Date(iso)
 let checks = 0
@@ -85,5 +87,80 @@ assert.ok(perDay(240) <= 6, `PSX capped at ${perDay(240)} refreshes a day`)
 assert.ok(perDay(20) <= 72, `MUFAP capped at ${perDay(20)} refreshes a day`)
 checks += 2
 
-console.log(`worker: ${checks} checks passed`)
+
 console.log(`  open endpoint worst case: ${perDay(240)} PSX + ${perDay(20)} MUFAP refreshes/day`)
+
+
+/* ── catch-up ──────────────────────────────────────────────────────────────
+ * Cloudflare delivered seven of eight fires on two days running and then none
+ * at all on 2026-10-30, with the triggers still registered and every past
+ * invocation green. A fire that never happens cannot notice it was missed, so
+ * the next one checks. What it must never do is treat a source that refused a
+ * fetch as a missed fire and ask again.
+ */
+
+const future = new Date(Date.now() + 3600_000).toISOString()
+const past = new Date(Date.now() - 3600_000).toISOString()
+
+const withFreshness = async (datasets, body) => {
+  const real = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ datasets }) })
+  try {
+    return await body()
+  } finally {
+    globalThis.fetch = real
+  }
+}
+
+const expect = async (datasets, expected, why) => {
+  const got = await withFreshness(datasets, () => overdueDomains())
+  assert.deepEqual(got.sort(), expected.sort(), why)
+  checks += 1
+}
+
+await expect(
+  { 'psx.stocks': { state: 'fresh', stale_at: future },
+    'mufap.funds': { state: 'fresh', stale_at: future } },
+  [], 'nothing overdue, nothing swept up'
+)
+
+await expect(
+  { 'psx.stocks': { state: 'fresh', stale_at: past },
+    'mufap.funds': { state: 'fresh', stale_at: future } },
+  ['psx'], 'a domain past its deadline is swept up'
+)
+
+await expect(
+  { 'psx.stocks': { state: 'degraded', stale_at: past },
+    'mufap.funds': { state: 'fresh', stale_at: future } },
+  [], 'a source that refused the fetch is left alone, however overdue'
+)
+
+await expect(
+  { 'psx.stocks': { state: 'fresh', stale_at: past, error: 'upstream said no' },
+    'mufap.funds': { state: 'fresh', stale_at: future } },
+  [], 'an error marks it blocked even where state does not'
+)
+
+await expect(
+  { 'psx.stocks': { state: 'fresh' }, 'mufap.funds': { state: 'fresh' } },
+  [], 'an envelope with no stale_at makes no claim either way'
+)
+
+await expect(
+  { 'psx.stocks': { state: 'fresh', stale_at: past, overdue_seconds: 0, on_schedule: true },
+    'mufap.funds': { state: 'fresh', stale_at: future } },
+  ['psx'], 'the frozen build-time verdict is ignored in favour of stale_at'
+)
+
+{
+  // A freshness file that cannot be read must not strand the fire's own
+  // dispatch, which happens after this and does not depend on it.
+  const real = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false })
+  assert.deepEqual(await overdueDomains(), [], 'an unreadable envelope sweeps up nothing')
+  globalThis.fetch = real
+  checks += 1
+}
+
+console.log(`worker: ${checks} checks passed`)

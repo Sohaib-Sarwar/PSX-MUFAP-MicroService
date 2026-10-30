@@ -132,6 +132,34 @@ async function fetchAges() {
   }
 }
 
+/**
+ * Domains whose published data is past the deadline it promised.
+ *
+ * Deliberately silent about a domain the source refused. `degraded` means a
+ * fetch ran and the upstream declined it; dispatching again is more requests
+ * at a host that has already said no, and the scheduled slot for that domain
+ * will try again at its normal cadence anyway. Only a domain that nothing
+ * fetched is worth sweeping up.
+ */
+export async function overdueDomains() {
+  const response = await fetch(`${FRESHNESS_URL}?t=${Date.now()}`, { cf: { cacheTtl: 0 } })
+  if (!response.ok) return []
+  const body = await response.json()
+  const now = Date.now()
+  const stale = []
+
+  for (const [domain, dataset] of Object.entries(DATASET_FOR)) {
+    const entry = body?.datasets?.[dataset]
+    if (!entry || entry.state === 'degraded' || entry.error) continue
+    // `stale_at` is absolute, so it stays true however long this file has sat
+    // in a CDN. `state` and `overdue_seconds` are frozen at build time and
+    // would still read "on schedule" hours after they stopped being so.
+    const deadline = Date.parse(entry.stale_at ?? '')
+    if (Number.isFinite(deadline) && now > deadline) stale.push(domain)
+  }
+  return stale
+}
+
 async function dispatch(domain, token) {
   if (!token) throw new Error('The worker has no GITHUB_TOKEN configured.')
 
@@ -188,11 +216,40 @@ export default {
     // The scheduled path is not throttled. It fires at the times the service
     // promises, and those times are already the interval.
     ctx.waitUntil(
-      dispatch(domain, env.GITHUB_TOKEN)
-        .then(() => log({ message: 'dispatched', domain, at: now.toISOString() }))
-        .catch((error) =>
-          logError({ message: 'scheduled dispatch failed', domain, error: error.message })
-        )
+      (async () => {
+        const wanted = new Set([domain])
+
+        // Catch up anything a dropped fire left behind.
+        //
+        // Cloudflare delivered seven of eight fires on 2026-10-27 and again on
+        // 2026-10-29, then none at all on 2026-10-30 — the triggers were still
+        // registered, the worker healthy, every past invocation green. A fire
+        // that never happens cannot notice it was missed, but the *next* one
+        // can, so each fire now also asks whether the other domain is overdue
+        // and sweeps it up if so. One dropped fire stops meaning stale data
+        // until the next day.
+        try {
+          const stale = await overdueDomains()
+          for (const name of stale) wanted.add(name)
+          if (stale.length) log({ message: 'catching up', domains: stale })
+        } catch (error) {
+          // Never let the catch-up lookup cost the fire its own dispatch.
+          logError({ message: 'catch-up check failed', error: String(error) })
+        }
+
+        for (const name of wanted) {
+          try {
+            await dispatch(name, env.GITHUB_TOKEN)
+            log({ message: 'dispatched', domain: name, at: now.toISOString() })
+          } catch (error) {
+            logError({
+              message: 'scheduled dispatch failed',
+              domain: name,
+              error: error.message,
+            })
+          }
+        }
+      })()
     )
   },
 
