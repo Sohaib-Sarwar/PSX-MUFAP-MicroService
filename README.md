@@ -351,13 +351,30 @@ again. Verified against a simulated race — both domains survive, and the branc
 stays at exactly one commit.
 
 **5. Lateness is published, not hidden.** Every freshness block carries
-`overdue_seconds` and `on_schedule`. Alarm on those rather than reimplementing
-the schedule:
+`stale_at` — the absolute instant the data stops being current, with the
+schedule's weekends and grace already in it. **Alarm on that.** One comparison
+against your own clock, and no schedule to reimplement:
 
 ```bash
 curl -s https://sohaib-sarwar.github.io/PSX-MUFAP-MicroService/api/freshness.json \
-  | jq '.datasets | to_entries[] | select(.value.on_schedule == false)'
+  | jq --arg now "$(date -Iseconds)" \
+      '.datasets | to_entries[] | select(.value.stale_at < $now)'
 ```
+
+Do **not** alarm on `state`, `overdue_seconds` or `on_schedule`. Those are
+computed when the site is built and then frozen into a static file that cannot
+tick — on 2026-10-30 `psx.stocks` served `overdue_seconds: 0` and
+`on_schedule: true` while five hours past its own deadline, and every consumer
+reading them was told the service was on time. They carry `computed_at` so you
+can see how old the verdict is.
+
+**6. Something is watching.** `.github/workflows/watchdog.yml` reads the
+published data every half hour and asks whether it is as recent as it promises.
+Run status is not a health signal here — a scrape that keeps the previous
+snapshot when a fetch fails exits 0, correctly — so the watchdog judges the data
+instead. It separates *nothing fetched* (it re-dispatches the scrape) from *the
+source refused* (it does not, and reports what the source said), and raises one
+GitHub issue per incident, closed automatically on recovery.
 
 It is weekend-aware: a Friday snapshot read on Sunday is on schedule, because
 the next run genuinely is not due until Monday.
@@ -489,6 +506,8 @@ answers it**:
     "state": "fresh",
     "fetched_at": "2026-09-25T01:36:06+05:00",
     "data_as_of": "2026-09-25",
+    "stale_at": "2026-09-25T19:30:00+05:00",
+    "computed_at": "2026-09-25T01:36:09+05:00",
     "stale_after_seconds": 7200,
     "next_refresh_at": "2026-09-25T18:00:00+05:00",
     "record_count": 552
@@ -501,12 +520,23 @@ answers it**:
 - **`data_as_of`** — what the *source* dates the figures: the NAV validity date
   for MUFAP, the session stamp PSX printed on the board for equities. Not the
   same as `fetched_at`, and it is the one that identifies the session.
-- **`state`** — `fresh`, `stale`, `degraded` or `unavailable`. `degraded` means
-  the last refresh failed and you are reading the previous good snapshot: real
-  data, just not new.
+- **`stale_at`** — the instant this data stops being current. **The field to
+  monitor**: it is absolute, so it stays true however long the response sat in
+  a cache.
+- **`state`** — `fresh`, `stale`, `degraded` or `unavailable`, *as of
+  `computed_at`*. `degraded` means the last refresh failed and you are reading
+  the previous good snapshot: real data, just not new, with `error` carrying
+  what the source said.
 
-`age_seconds` is measured when the file is written and **cannot tick on a static
-host**. Compute it yourself:
+`state`, `overdue_seconds`, `on_schedule` and `age_seconds` are all evaluated
+when the file is written and **cannot tick on a static host**; `computed_at`
+says when they were true. Either compare `stale_at` to now:
+
+```js
+const stale = Date.now() > Date.parse(body.freshness.stale_at)
+```
+
+or recompute the age from `fetched_at`, which is absolute too:
 
 ```js
 const age = (Date.now() - Date.parse(body.freshness.fetched_at)) / 1000
