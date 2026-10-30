@@ -102,17 +102,22 @@ jobs:
           footer='Detected by the [watchdog](%s). This issue is edited in place while the problem persists, and closed automatically once every dataset is back within its refresh window.\n'
           body=$(printf "%s\n\n---\n\n${footer}" "$REPORT" "$RUN_URL")
 
+          # Before the list, not inside the branch below it: `gh issue list`
+          # exits non-zero on a label that does not exist, and under `set -e`
+          # that kills this step on the very first incident — the one run where
+          # the label has never been created. Creating it first is idempotent.
+          gh label create watchdog --color b60205 \
+            --description 'Raised automatically when published data goes stale' \
+            2>/dev/null || true
+
           existing=$(gh issue list --label watchdog --state open \
-            --json number --jq '.[0].number // empty')
+            --json number --jq '.[0].number // empty' || true)
 
           if [ -n "$existing" ]; then
             echo "updating issue #$existing"
             gh issue edit "$existing" --body "$body"
           else
             echo "opening a new issue"
-            gh label create watchdog --color b60205 \
-              --description 'Raised automatically when published data goes stale' \
-              2>/dev/null || true
             gh issue create --title "$title" --label watchdog --body "$body"
           fi
 
@@ -124,7 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           existing=$(gh issue list --label watchdog --state open \
-            --json number --jq '.[0].number // empty')
+            --json number --jq '.[0].number // empty' || true)
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$(printf 'Recovered.\n\n%s\n' "$REPORT")"
             gh issue close "$existing"
