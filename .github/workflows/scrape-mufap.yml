@@ -1,7 +1,8 @@
 name: MUFAP — evening NAV
 
-# MUFAP strikes NAV once per business day and publishes it some time during the
-# evening, so the window 18:00–00:00 PKT (13:00–19:00 UTC) is swept hourly.
+# MUFAP publishes NAVs at no fixed evening hour, and keeps posting late and
+# forward-dated NAVs on Saturday and Sunday, so the window 18:00–00:00 PKT
+# (13:00–19:00 UTC) is swept hourly every day of the week.
 #
 # The cron asks every 30 minutes — fourteen fires for seven wanted fetches —
 # because GitHub delivers only one or two of seven hourly requests on this
@@ -16,7 +17,7 @@ on:
   schedule:
     # :11 and :41 rather than :00 and :30 — see the note in scrape-psx.yml.
     # The top and the half hour are the two slots GitHub drops most often.
-    - cron: '11,41 13-19 * * 1-5'
+    - cron: '11,41 13-19 * * *'
   workflow_dispatch:
     inputs:
       force:

@@ -103,7 +103,7 @@ so the mapping is a fixed five-hour shift with no seasonal correction.
 | Workflow | PKT | UTC cron | Runs per week |
 | --- | --- | --- | --- |
 | `scrape-psx.yml` | 17:00, Mon–Fri | `0 12 * * 1-5` | 5 |
-| `scrape-mufap.yml` | 18:00 → 00:00 hourly, Mon–Fri | `0 13-19 * * 1-5` | 35 |
+| `scrape-mufap.yml` | 18:00 → 00:00 hourly, every day | `0 13-19 * * *` | 49 |
 | `pages.yml` | on change only | — | — |
 | `ci.yml` | on push and PR | — | — |
 

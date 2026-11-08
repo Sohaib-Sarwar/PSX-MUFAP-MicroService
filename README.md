@@ -330,7 +330,7 @@ intended times.
 | | Target | Cron asks for | Minimum interval |
 |---|---|---|---|
 | PSX | 17:00 PKT, working days | `0 12-17 * * 1-5` (6 fires) | 600 min |
-| MUFAP | 18:00–00:00 PKT hourly, working days | `0,30 13-19 * * 1-5` (14 fires) | 45 min |
+| MUFAP | 18:00–00:00 PKT hourly, every day | `11,41 13-19 * * *` (14 fires) | 45 min |
 
 **3. Cheap refusal.** Every run checks how long ago a fetch actually succeeded
 *before* installing anything, using the runner's preinstalled Python and the
@@ -985,13 +985,14 @@ The site is then at `https://<owner>.github.io/<repo>/`, with the API under
 | Workflow | Pakistan time | UTC cron |
 | --- | --- | --- |
 | PSX | 17:10, Mon–Fri — after the close | `10 12 * * 1-5` |
-| MUFAP | 18:05 → 00:05 hourly, Mon–Fri | `5 13-19 * * 1-5` |
+| MUFAP | 18:00 → 00:00 hourly, every day | `0 13-19 * * *` |
 
 PSX publishes one closing board per trading day, so it is fetched once. MUFAP
-strikes NAV once per business day but at no fixed hour, so the evening is swept —
-and each run exits without opening a connection if the published validity date
-already covers the current session, which typically costs one or two fetches out
-of a possible seven.
+strikes NAV once per business day but at no fixed hour, and keeps posting late
+NAVs and forward-dated ones through the weekend, so every evening is swept at all
+seven slots. Each slot really fetches: a validity date that already looks current
+is not a reason to skip, because MUFAP corrects and back-fills NAVs under dates
+it has already published.
 
 Full setup, resource budget, policy notes and troubleshooting:
 **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.

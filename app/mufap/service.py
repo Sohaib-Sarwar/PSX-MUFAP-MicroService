@@ -1,8 +1,8 @@
 """MUFAP service: fetch both tabs, merge, validate, publish, read.
 
-MUFAP strikes NAV once per business day. Polling faster than that cannot make
-the number fresher, so the scheduler backs off once the validity date advances
-rather than re-fetching on a fixed clock.
+MUFAP posts NAVs at no fixed evening hour and keeps posting late and corrected
+ones under dates it has already published, so every scheduled slot fetches —
+none is skipped because the batch's validity date already looks current.
 """
 
 from __future__ import annotations

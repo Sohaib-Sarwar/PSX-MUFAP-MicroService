@@ -53,13 +53,17 @@ SCHEDULES: dict[str, dict[str, Any]] = {
         "grace_minutes": 180,
     },
     "mufap": {
-        "cron": "0 13-19 * * 1-5",
-        "backstop_cron": "0,30 13-19 * * 1-5",
-        "weekdays": [0, 1, 2, 3, 4],        # Mon-Fri, UTC (JSON-serialisable)
+        # Every day, not working days only. MUFAP keeps posting after Friday's
+        # last slot: between 00:56 PKT on 2026-11-07 and the Sunday after, 69
+        # of 571 NAVs changed, which a weekday-only schedule left unpublished
+        # until Monday evening.
+        "cron": "0 13-19 * * *",
+        "backstop_cron": "11,41 13-19 * * *",
+        "weekdays": [0, 1, 2, 3, 4, 5, 6],  # every day, UTC (JSON-serialisable)
         "hours": list(range(13, 20)),       # 18:00 -> 00:00 PKT
         "minute": 0,
-        "human": "Hourly on working evenings at 18:00, 19:00, 20:00, 21:00, "
-                 "22:00, 23:00 and 00:00 PKT.",
+        "human": "Every evening at 18:00, 19:00, 20:00, 21:00, 22:00, 23:00 "
+                 "and 00:00 PKT.",
         "grace_minutes": 90,
     },
 }
@@ -530,6 +534,10 @@ def build_mufap(writer: Writer, funds: Dataset
     meta = funds.meta or {}
     catalog: list[dict[str, Any]] = []
 
+    # Stable sort on name: funds sharing a name (VPS sub-funds) keep MUFAP's
+    # own row order, which is what fixes their `-2`/`-3` suffixes. That order
+    # has been stable across days (checked 2026-11-06 vs 2026-11-08); sorting
+    # ties any other way would remap 56 published slugs.
     shaped.sort(key=lambda r: r.get("fund_name") or "")
 
     # A fund name is not a URL. Every row carries the slug that addresses its own
@@ -804,15 +812,17 @@ SCHEMAS: dict[str, dict[str, str]] = {
         "trustee": "Trustee institution.",
         "rating": "Stability or performance rating where one is published.",
         "benchmark": "The fund's stated benchmark.",
-        "nav": "Net asset value per unit, to four decimals.",
+        "nav": "Net asset value per unit, to four decimals. The newest NAV MUFAP publishes for the fund across its performance (tab=1) and price (tab=3) tables, which MUFAP does not update together.",
         "offer_price": "Price to buy a unit, or null where MUFAP publishes none. Pension and VPS funds transact at NAV and quote no offer price; it is null rather than 0.0 so it is never multiplied by a unit count.",
-        "repurchase_price": "Price the fund buys a unit back at, or null where MUFAP publishes none.",
+        "repurchase_price": "Price the fund buys a unit back at, or null where MUFAP publishes none. Also null when MUFAP's price table is a day behind its NAV, so this is always for `validity_date` and never an older day's price.",
         "market_price": "Last traded price, for the three listed closed-end funds. Null for the open-end majority, which do not trade on an exchange.",
         "front_end_load": "Sales load charged on purchase, in percent. Zero is a real value here — most funds charge no front-end load — and is not treated as absent.",
         "back_end_load": "Load charged on redemption, in percent. Zero is a real value.",
         "contingent_load": "Contingent load where one applies, in percent. Zero is a real value.",
         "inception_date": "Fund launch date.",
         "validity_date": "The date this NAV is valid for. Funds do not all publish on the same day.",
+        "returns_as_of": "Date of the fund's row in MUFAP's performance table (tab=1), which the `returns` are for. Can trail `validity_date`.",
+        "prices_as_of": "Date of the fund's row in MUFAP's price table (tab=3). When it trails `validity_date`, offer/repurchase/market prices are null.",
         "return_basis": "How the fund reports returns — annualised or absolute.",
         "returns": "Object keyed by period: " + ", ".join(f"`{p}`" for p in RETURN_PERIODS) + ".",
     },

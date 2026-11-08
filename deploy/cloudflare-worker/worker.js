@@ -83,8 +83,11 @@ export function domainFor(date) {
   const day = date.getUTCDay() // 0 Sun .. 6 Sat
   const hour = date.getUTCHours()
 
-  if (day === 0 || day === 6) return null // PSX and MUFAP both rest
-  if (hour === 12) return 'psx' // 17:00 PKT, after the close
+  const weekend = day === 0 || day === 6
+
+  if (hour === 12) return weekend ? null : 'psx' // 17:00 PKT, after the close
+  // Every day. MUFAP keeps posting late and forward-dated NAVs on Saturday and
+  // Sunday: 69 of 571 changed after Friday's last slot on 2026-11-06.
   if (hour >= 13 && hour <= 19) return 'mufap' // 18:00 -> 00:00 PKT
   return null
 }

@@ -34,11 +34,11 @@ head_sampling_rate = 0.1
 #
 # Which domain each hour refreshes is decided by domainFor() in worker.js and
 # covered by worker.test.mjs — one PSX fire and seven MUFAP fires a working
-# day, with none wasted.
+# day (MUFAP's seven on weekends too), with none wasted.
 [triggers]
 crons = [
   "0 12 * * 1-5",     # 17:00 PKT — PSX, after the close
-  "0 13-19 * * 1-5",  # 18:00 → 00:00 PKT hourly — MUFAP
+  "0 13-19 * * *",    # 18:00 → 00:00 PKT hourly, every day — MUFAP
 ]
 
 # One secret, set with `npm run secrets`, never in this file:

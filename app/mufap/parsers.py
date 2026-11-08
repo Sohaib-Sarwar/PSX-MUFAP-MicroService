@@ -204,6 +204,36 @@ def parse_prices_tab(html: str) -> list[dict[str, Any]]:
 
 # ── merge ─────────────────────────────────────────────────────────────────────
 
+def pick_current_nav(
+    perf: dict[str, Any] | None,
+    price: dict[str, Any],
+) -> tuple[float, str | None, bool]:
+    """The newest NAV either tab carries, its date, and whether tab=3 is current.
+
+    MUFAP does not update the two tabs together. The same fund can sit on one
+    date in tab=1 and a later one in tab=3, or the other way round: on
+    2026-11-08, 4 of 571 funds were ahead in tab=3, and in the 2026-11-06
+    snapshot 69 funds had a tab=1 NAV from an earlier day than their tab=3
+    repurchase price. The merge used to take tab=1 unconditionally, so in
+    every one of those cases it published an older NAV and date than MUFAP
+    had already posted.
+
+    The NAV and the date always come from the same tab, whichever is newer;
+    a tie goes to tab=1, where the two agree anyway. Returns
+    (nav, validity_date, prices_current) where prices_current says whether
+    tab=3's offer/repurchase prices are for that same date.
+    """
+    perf_date = (perf or {}).get("validity_date")
+    price_date = price.get("validity_date")
+    perf_nav = (perf or {}).get("nav")
+
+    if perf_nav is None:
+        return price["nav"], price_date, True
+    if price_date and (not perf_date or price_date > perf_date):
+        return price["nav"], price_date, True
+    return perf_nav, perf_date, perf_date == price_date
+
+
 def merge_funds(
     returns_rows: list[dict[str, Any]],
     price_rows: list[dict[str, Any]],
@@ -229,10 +259,7 @@ def merge_funds(
         if perf:
             matched += 1
 
-        # tab=1 is refreshed marginally ahead of tab=3 for some funds, so prefer
-        # its validity date and NAV when the two disagree.
-        validity = (perf or {}).get("validity_date") or price.get("validity_date")
-        nav = (perf or {}).get("nav") or price["nav"]
+        nav, validity, prices_current = pick_current_nav(perf, price)
 
         merged.append({
             "fund_name": price["fund_name"],
@@ -244,13 +271,21 @@ def merge_funds(
             "benchmark": (perf or {}).get("benchmark"),
             "inception_date": price.get("inception_date"),
             "nav": nav,
-            "offer_price": price.get("offer_price"),
-            "repurchase_price": price.get("repurchase_price"),
-            "market_price": price.get("market_price"),
+            # Offer/repurchase/market are tab=3 prices for tab=3's own date.
+            # When tab=1 has already moved on, those prices belong to an older
+            # day than `nav`; publishing them beside the newer NAV and date is
+            # how a consumer valuing at `repurchase_price or nav` ended up with
+            # one day's price filed under another day. Null instead.
+            "offer_price": price.get("offer_price") if prices_current else None,
+            "repurchase_price": price.get("repurchase_price") if prices_current else None,
+            "market_price": price.get("market_price") if prices_current else None,
             "front_end_load": price.get("front_end_load"),
             "back_end_load": price.get("back_end_load"),
             "contingent_load": price.get("contingent_load"),
             "validity_date": validity,
+            # Each tab's own date, so the spread between them is visible.
+            "returns_as_of": (perf or {}).get("validity_date"),
+            "prices_as_of": price.get("validity_date"),
             "return_basis": (perf or {}).get("return_basis"),
             "returns": (perf or {}).get("returns") or {k: None for k, _ in RETURN_PERIODS},
         })
@@ -269,6 +304,8 @@ def merge_funds(
             "offer_price": None, "repurchase_price": None, "market_price": None,
             "front_end_load": None, "back_end_load": None, "contingent_load": None,
             "validity_date": leftover.get("validity_date"),
+            "returns_as_of": leftover.get("validity_date"),
+            "prices_as_of": None,
             "return_basis": leftover.get("return_basis"),
             "returns": leftover.get("returns"),
         })

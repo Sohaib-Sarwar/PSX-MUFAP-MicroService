@@ -192,3 +192,66 @@ def test_batch_date_breaks_ties_toward_the_newer_date():
 
 def test_batch_date_is_none_when_no_fund_publishes_one():
     assert parsers.latest_validity([{"validity_date": None}, {}]) is None
+
+
+# ── merge: the two tabs on different dates ────────────────────────────────────
+# MUFAP does not update tab=1 and tab=3 together. These are the shapes seen
+# live on 2026-11-06/08, reduced to the fields the merge reads.
+
+def _perf(nav, date, name="HBL Income Fund"):
+    return {"sector": "Open-End Funds", "fund_name": name, "category": "Income",
+            "return_basis": "annualized", "rating": "A(f)", "benchmark": "x",
+            "validity_date": date, "nav": nav,
+            "returns": {k: 1.0 for k, _ in parsers.RETURN_PERIODS}}
+
+
+def _price(nav, date, repurchase, name="HBL Income Fund", offer=None):
+    return {"sector": "Open-End Funds", "fund_name": name, "category": "Income",
+            "amc": "HBL", "inception_date": None, "offer_price": offer or repurchase,
+            "repurchase_price": repurchase, "nav": nav, "validity_date": date,
+            "front_end_load": 0.0, "back_end_load": 0.0, "contingent_load": 0.0,
+            "market_price": 0.0, "trustee": "CDC"}
+
+
+def test_merge_takes_the_newer_nav_when_tab3_is_ahead():
+    """HBL Income Fund, 2026-11-08: tab=1 117.4659 @ 11-05, tab=3 117.4684 @
+    11-06. The merge used to publish tab=1's older NAV and date."""
+    [row] = parsers.merge_funds([_perf(117.4659, "2026-11-05")],
+                                [_price(117.4684, "2026-11-06", 117.4684)])
+    assert row["nav"] == 117.4684
+    assert row["validity_date"] == "2026-11-06"
+    assert row["repurchase_price"] == 117.4684
+    assert row["returns_as_of"] == "2026-11-05"
+    assert row["prices_as_of"] == "2026-11-06"
+    assert row["returns"]["ytd"] == 1.0  # performance is still carried
+
+
+def test_merge_never_pairs_a_price_with_another_days_nav():
+    """UBL Stock Advantage, 2026-11-06 snapshot: tab=1 248.16 @ 11-04 was
+    published beside tab=3's repurchase 250.44 — a newer day's price filed
+    under the older date, which a consumer valuing at `repurchase or nav` read
+    as the 11-04 price."""
+    [row] = parsers.merge_funds([_perf(250.40, "2026-11-09")],
+                                [_price(248.16, "2026-11-04", 248.16)])
+    assert row["nav"] == 250.40
+    assert row["validity_date"] == "2026-11-09"
+    # tab=3's prices are for 11-04 and must not appear beside an 11-09 NAV
+    assert row["repurchase_price"] is None
+    assert row["offer_price"] is None
+    assert row["prices_as_of"] == "2026-11-04"
+
+
+def test_merge_keeps_prices_when_both_tabs_agree():
+    [row] = parsers.merge_funds([_perf(53.4522, "2026-11-06")],
+                                [_price(53.4522, "2026-11-06", 53.40, offer=54.0)])
+    assert row["nav"] == 53.4522
+    assert row["repurchase_price"] == 53.40
+    assert row["offer_price"] == 54.0
+
+
+def test_merge_with_no_tab1_counterpart_uses_tab3():
+    [row] = parsers.merge_funds([], [_price(10.0, "2026-11-06", 10.0)])
+    assert row["nav"] == 10.0
+    assert row["validity_date"] == "2026-11-06"
+    assert row["repurchase_price"] == 10.0
+    assert row["returns_as_of"] is None

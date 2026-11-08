@@ -33,9 +33,14 @@ check('2026-09-28T11:00:00Z', null, 'before the PSX slot')
 check('2026-09-28T20:00:00Z', null, 'after the MUFAP window')
 check('2026-09-28T03:00:00Z', null, 'middle of the night')
 
-// Weekends: PSX does not trade and MUFAP does not strike NAV.
-check('2026-09-26T12:00:00Z', null, 'Saturday')
-check('2026-09-27T15:00:00Z', null, 'Sunday')
+// Weekends: PSX does not trade, but MUFAP keeps posting NAVs, so its evening
+// window runs every day.
+check('2026-09-26T12:00:00Z', null, 'Saturday, no PSX')
+check('2026-09-27T12:00:00Z', null, 'Sunday, no PSX')
+check('2026-09-26T13:00:00Z', 'mufap', 'Saturday 18:00 PKT')
+check('2026-09-27T15:00:00Z', 'mufap', 'Sunday 20:00 PKT')
+check('2026-09-27T19:00:00Z', 'mufap', 'Sunday 00:00 PKT')
+check('2026-09-27T20:00:00Z', null, 'Sunday after the window')
 
 // Every weekday behaves identically.
 for (const day of ['29', '30']) {

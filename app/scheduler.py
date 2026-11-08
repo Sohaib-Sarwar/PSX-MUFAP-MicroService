@@ -7,8 +7,9 @@ data that had not changed.
 
 Here:
   PSX    polls fast while the market is ticking and slowly when it is closed.
-  MUFAP  polls hourly until the published validity date advances, then stops
-         for the day.
+  MUFAP  polls hourly, every time. A validity date that already looks current
+         is not a reason to skip: MUFAP back-fills and corrects NAVs under
+         dates it has already published.
 
 Not used on Vercel — serverless has no background loop, and Vercel Cron calls
 POST /internal/refresh instead.
@@ -93,10 +94,10 @@ def build_mufap_worker() -> Callable[[], Awaitable[float]]:
         validity = snapshot.data_as_of
 
         if validity and validity == last_seen["validity"]:
-            # Nothing new published since the last run; there is no point
-            # re-fetching a once-daily figure on a tight loop.
-            logger.info("mufap_unchanged", extra={"validity_date": validity})
-            return s.mufap_interval_s
+            # Logged, never acted on: the same batch date can still carry new
+            # or corrected NAVs for individual funds, so the next poll runs at
+            # the normal interval regardless.
+            logger.info("mufap_batch_date_unchanged", extra={"validity_date": validity})
 
         last_seen["validity"] = validity
         return s.mufap_interval_s
