@@ -7,25 +7,28 @@
  *
  *   { "source": "psx",   "symbols": ["MEBL", "FFC"] }                       ≤ 40 symbols
  *   { "source": "mufap", "tab": 1, "funds": [{ "name": "…", "category": "…" }] }   ≤ 40 funds
+ *   { "source": "amc",   "funds": [{ "name": "…", "amc": "UBL Fund Managers Limited" }] } ≤ 40 funds
  *
  * PSX: one company page per symbol (dps.psx.com.pk/company/SYM), six at a time.
  * MUFAP: one IndustryStatDaily tab per request (tab=1 NAV/returns, tab=3 prices), so each
  * request stays inside the Workers CPU budget; the caller asks for both tabs in parallel and
  * keeps whichever is newer per fund, as the scraper does.
+ * AMC: each fund manager's own published price table (see AMCS), one page per manager.
  *
  * Bounded by construction, like /v1/refresh: no key, but capped inputs and the edge cache in
- * front of every upstream page (PSX 60 s, MUFAP 10 min), so however often it is called the
+ * front of every upstream page (PSX 60 s, MUFAP and AMC pages 10 min), so however often it is called the
  * sources see at most one request per page per window.
  *
  * Plain requests, honestly identified. If a source refuses (MUFAP's bot management has been
- * challenging datacenter addresses), the answer says so and nothing is retried: this path is not
- * a way around anyone's firewall. The caller keeps the last published figure.
+ * challenging datacenter addresses), the answer says so and the refusal is not retried: this path
+ * is not a way around anyone's firewall. The caller keeps the last published figure, or reads the
+ * fund manager's own page. Only a PSX page that timed out or failed with a 5xx is asked once more.
  */
 
 const UA = 'Mozilla/5.0 (compatible; PK-Finance-Service/6.0; +https://github.com/Sohaib-Sarwar/PSX-MUFAP-MicroService)'
 const PSX = 'https://dps.psx.com.pk'
 const MUFAP = 'https://www.mufap.com.pk/Industry/IndustryStatDaily'
-const TTL = { psx: 60, mufap: 600 }
+const TTL = { psx: 60, mufap: 600, amc: 600 }
 export const LIMITS = { symbols: 40, funds: 40 }
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 }
 
@@ -137,6 +140,116 @@ export function parseMufapTab(html, wanted) {
   return out
 }
 
+// ── Fund managers (AMCs) ────────────────────────────────────────────────────
+//
+// MUFAP compiles the industry table from what each fund manager reports, and every manager
+// also publishes its own funds' prices on its own website, in a plain HTML table. That is the
+// primary source, it is usually a few hours ahead of MUFAP, and it answers plain requests. When
+// MUFAP refuses, a held fund's price is read from its manager instead.
+//
+// One entry per manager, keyed by the AMC name exactly as MUFAP prints it (funds.json `amc`).
+// Columns are found by header text, never by position. `price` is what a holding is worth:
+// the redemption / repurchase price, or the NAV where a fund quotes no separate price.
+
+const dmyDate = (s) => {
+  const m = /(\d{1,2})[\s-]+([A-Za-z]{3})[a-z]*[\s-]+(\d{4})/.exec(s ?? '')
+  if (!m || !MONTHS[m[2].toLowerCase()]) return null
+  return `${m[3]}-${String(MONTHS[m[2].toLowerCase()]).padStart(2, '0')}-${m[1].padStart(2, '0')}`
+}
+
+/** "Al-Ameen Islamic Cash Fund***" and "Al Ameen Islamic Cash Fund" → "alameenislamiccashfund". */
+export const fundNorm = (s) => decode(String(s ?? '')).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '')
+
+export const AMCS = {
+  'UBL Fund Managers Limited': {
+    id: 'ubl',
+    url: 'https://www.ublfunds.com.pk/resources-tools/fund-performance-tools/latest-fund-prices/',
+    cols: { date: (h) => h === 'applicable on', redemption: (h) => h.startsWith('redemption price'), offer: (h) => h.startsWith('offer price') },
+  },
+  'Al Meezan Investment Management Limited': {
+    id: 'meezan',
+    url: 'https://www.almeezangroup.com/fund-prices/',
+    cols: { date: (h) => h === 'validity date', redemption: (h) => h.startsWith('repurchase'), offer: (h) => h.startsWith('offer'), nav: (h) => h.startsWith('nav') },
+  },
+}
+
+/**
+ * Every price table on a manager's page, for the funds asked for.
+ * The fund name is the first cell of a row; each table's own header row says where the date
+ * and prices are (UBL repeats its header per table, and a fund can be listed twice).
+ * → [{ name, validity_date, price, kind, nav, repurchase_price, offer_price }]
+ */
+export function parseAmcPage(html, amc, wanted) {
+  const want = new Set(wanted.map(fundNorm))
+  const out = new Map()
+  for (const table of html.split(/<table[\s>]/i).slice(1)) {
+    const end = table.search(/<\/table>/i)
+    const t = end >= 0 ? table.slice(0, end) : table
+    const rows = t.split(/<tr[\s>]/i).slice(1)
+    let idx = null
+    for (const row of rows) {
+      const cells = [...row.matchAll(/<t([dh])[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((m) => text(m[2]))
+      if (!cells.length) continue
+      // A header row: one whose cells name the date column.
+      const lower = cells.map((c) => c.toLowerCase())
+      const dateAt = lower.findIndex(amc.cols.date)
+      if (dateAt >= 0) {
+        const find = (pred) => (pred ? lower.findIndex(pred) : -1)
+        idx = { date: dateAt, redemption: find(amc.cols.redemption), offer: find(amc.cols.offer), nav: find(amc.cols.nav) }
+        continue
+      }
+      if (!idx) continue
+      const name = cells[0]
+      const key = fundNorm(name)
+      if (!want.has(key) || out.has(key)) continue
+      const positive = (i) => { const v = i >= 0 ? num(cells[i]) : null; return v && v > 0 ? v : null }
+      const redemption = positive(idx.redemption)
+      const nav = positive(idx.nav)
+      const price = redemption ?? nav
+      const date = dmyDate(cells[idx.date])
+      if (!price || !date) continue
+      out.set(key, {
+        name: name.replace(/\*+$/, '').trim(), validity_date: date, price,
+        kind: redemption ? 'repurchase' : 'nav',
+        nav: nav ?? redemption, repurchase_price: redemption, offer_price: positive(idx.offer),
+      })
+    }
+  }
+  return [...out.values()]
+}
+
+/**
+ * funds: [{ name, amc }] → one page per manager, in parallel.
+ * → { managers: [{ amc, status, url, error? }], funds: [{ name, amc, …parseAmcPage row }] }
+ */
+export async function amcQuotes(funds) {
+  const byAmc = new Map()
+  for (const f of funds) {
+    if (!AMCS[f.amc]) continue
+    if (!byAmc.has(f.amc)) byAmc.set(f.amc, [])
+    byAmc.get(f.amc).push(f.name)
+  }
+  const managers = []
+  const found = []
+  await Promise.all([...byAmc].map(async ([amc, names]) => {
+    const def = AMCS[amc]
+    try {
+      const r = await cachedText(def.url, TTL.amc, 20000)
+      if (!r.body) {
+        managers.push({ amc, id: def.id, status: r.challenge ? 'blocked' : 'unavailable', http: r.status, url: def.url })
+        return
+      }
+      const rows = parseAmcPage(r.body, def, names)
+      managers.push({ amc, id: def.id, status: 'ok', cached: r.cached, url: def.url, matched: rows.length })
+      for (const row of rows) found.push({ ...row, amc, source_url: def.url })
+    } catch (error) {
+      managers.push({ amc, id: def.id, status: 'unavailable', url: def.url, error: String(error?.message ?? error) })
+    }
+  }))
+  const unsupported = [...new Set(funds.filter((f) => !AMCS[f.amc]).map((f) => f.amc || 'unknown'))]
+  return { managers, unsupported, funds: found }
+}
+
 /** A Cloudflare challenge rather than the page. */
 const challenged = (res) => res.status === 403 || res.status === 503 || res.headers.get('cf-mitigated') === 'challenge'
 
@@ -174,16 +287,29 @@ async function pool(items, size, fn) {
   return out
 }
 
-export async function psxQuotes(symbols) {
-  return pool(symbols, 6, async (symbol) => {
-    try {
-      const r = await cachedText(`${PSX}/company/${encodeURIComponent(symbol)}`, TTL.psx, 12000)
-      if (!r.body) return { symbol, status: r.status === 404 ? 'not_found' : 'unavailable', http: r.status }
-      return { ...parsePsxCompany(r.body, symbol), cached: r.cached }
-    } catch (error) {
-      return { symbol, status: 'unavailable', error: String(error?.name ?? error) }
-    }
-  })
+async function psxOne(symbol) {
+  try {
+    const r = await cachedText(`${PSX}/company/${encodeURIComponent(symbol)}`, TTL.psx, 12000)
+    if (!r.body) return { symbol, status: r.status === 404 ? 'not_found' : 'unavailable', http: r.status }
+    return { ...parsePsxCompany(r.body, symbol), cached: r.cached }
+  } catch (error) {
+    return { symbol, status: 'unavailable', error: String(error?.name ?? error) }
+  }
+}
+
+/**
+ * Six at a time; a symbol that timed out or got a 5xx is asked once more after the rest, two at
+ * a time (PSX's company pages are slow under load, and 2 of 11 failing on 2026-11-10 was that).
+ * A 404 or a page without a price is an answer, not a failure, and is not retried.
+ */
+export async function psxQuotes(symbols, { retryDelayMs = 800 } = {}) {
+  const first = await pool(symbols, 6, psxOne)
+  const again = first.map((q, i) => (q.status === 'unavailable' ? i : -1)).filter((i) => i >= 0)
+  if (!again.length) return first
+  await new Promise((r) => setTimeout(r, retryDelayMs))
+  const second = await pool(again.map((i) => symbols[i]), 2, psxOne)
+  again.forEach((i, k) => { first[i] = { ...second[k], retried: true } })
+  return first
 }
 
 export async function mufapQuotes(tab, funds) {
@@ -216,5 +342,13 @@ export async function handleQuotes(payload) {
     const result = await mufapQuotes(tab, funds)
     return [200, { source: 'mufap', tab, fetched_at: new Date().toISOString(), ms: Date.now() - started, ...result }]
   }
-  return [400, { error: 'source must be "psx" or "mufap".' }]
+  if (payload?.source === 'amc') {
+    const funds = (payload.funds ?? []).filter((f) => f && typeof f.name === 'string' && f.name.trim())
+      .map((f) => ({ name: f.name.slice(0, 160), amc: String(f.amc ?? '').slice(0, 120) }))
+    if (!funds.length || funds.length > LIMITS.funds) return [400, { error: `funds: 1 to ${LIMITS.funds} { name, amc }.` }]
+    const result = await amcQuotes(funds)
+    const status = result.funds.length ? 'ok' : result.managers.some((m) => m.status === 'ok') ? 'ok' : result.managers.length ? 'unavailable' : 'unsupported'
+    return [200, { source: 'amc', fetched_at: new Date().toISOString(), ms: Date.now() - started, status, ...result }]
+  }
+  return [400, { error: 'source must be "psx", "mufap" or "amc".' }]
 }

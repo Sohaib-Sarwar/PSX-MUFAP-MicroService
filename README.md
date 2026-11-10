@@ -388,11 +388,19 @@ for exactly those, and the worker fetches them from the source itself, in second
 POST https://pk-finance-cron.pk-microservice.workers.dev/v1/quotes
 { "source": "psx",   "symbols": ["MEBL", "FFC"] }                                      ≤ 40
 { "source": "mufap", "tab": 1, "funds": [{ "name": "ABL Cash Fund", "category": "Money Market" }] }   ≤ 40, tab 1 or 3
+{ "source": "amc",   "funds": [{ "name": "Al Ameen Islamic Cash Fund", "amc": "UBL Fund Managers Limited" }] }  ≤ 40
 ```
+
+`amc` reads each fund manager's own published price table, one page per manager (the managers report
+these prices to MUFAP, and post them on their own sites first). Managers are a registry, `AMCS` in
+quotes.js, keyed by MUFAP's `amc` name; today UBL Fund Managers and Al Meezan. A manager not in it comes
+back under `unsupported`. Columns are found by header text; the price is the redemption / repurchase
+price, or the NAV where none is quoted.
 
 PSX is one company page per symbol; MUFAP is one IndustryStatDaily tab per request (ask for tab 1 and 3
 and keep the newer row per fund), which keeps each call inside the Workers CPU budget. No key: inputs are
-capped and every upstream page sits behind the edge cache (PSX 60 s, MUFAP 10 min). A refusal by the
+capped and every upstream page sits behind the edge cache (PSX 60 s, MUFAP and manager pages 10 min). A PSX
+page that times out or fails with a 5xx is asked once more. A refusal by the
 source (MUFAP's Cloudflare challenge) comes back as `status: "blocked"` with the ray id and is not retried.
 Fintraxa's Settings > Market prices uses it through its `refresh-prices` Edge Function. Code and tests:
 `deploy/cloudflare-worker/quotes.js`, `worker.test.mjs`. The scheduled jobs below are unchanged.

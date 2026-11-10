@@ -198,6 +198,58 @@ async function dispatch(domain, token) {
   }
 }
 
+/**
+ * Cancel runs GitHub has left in `waiting` for longer than any real wait.
+ *
+ * On 2026-11-09 at 18:03Z the Deploy job of one refresh went to `waiting` on the github-pages
+ * environment and never left it: no reviewers, no wait timer, an allowed branch. Every deploy
+ * shares the `github-pages-deployment` concurrency group, so each later run queued behind it and
+ * was cancelled when the next one queued — twenty-two hours of scrapes that ran and never
+ * published, while the runs themselves reported "cancelled" rather than failing. Nothing in this
+ * repository waits for approval, so a run still waiting after STUCK_MINUTES is stuck, and the
+ * queue is unblocked by cancelling it. Needs the token's Actions: write; without it this logs
+ * and carries on.
+ */
+export const STUCK_MINUTES = 30
+
+export function stuckRuns(runs, now = Date.now()) {
+  return (runs ?? []).filter((r) => r.status === 'waiting' && now - Date.parse(r.created_at) > STUCK_MINUTES * 60000)
+}
+
+async function github(path, token, method = 'GET') {
+  return fetch(`https://api.github.com/repos/${OWNER}/${REPO}${path}`, {
+    method,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': `${OWNER}-pk-finance-refresh`,
+    },
+  })
+}
+
+export async function clearStuckRuns(token) {
+  if (!token) return []
+  const list = await github('/actions/runs?status=waiting&per_page=20', token)
+  if (!list.ok) {
+    logError({ message: 'stuck-run check failed', status: list.status })
+    return []
+  }
+  const cleared = []
+  for (const run of stuckRuns((await list.json()).workflow_runs)) {
+    let res = await github(`/actions/runs/${run.id}/cancel`, token, 'POST')
+    if (res.status === 409) res = await github(`/actions/runs/${run.id}/force-cancel`, token, 'POST')
+    const ok = res.status === 202
+    ;(ok ? log : logError)({
+      message: ok ? 'cancelled stuck run' : 'could not cancel stuck run',
+      run: run.id, name: run.name, created_at: run.created_at, status: res.status,
+      ...(res.status === 403 ? { hint: "the worker's GitHub token needs Actions: write" } : {}),
+    })
+    if (ok) cleared.push(run.id)
+  }
+  return cleared
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -223,6 +275,13 @@ export default {
     ctx.waitUntil(
       (async () => {
         const wanted = new Set([domain])
+
+        // A run stuck in `waiting` blocks every publish after it; clear it before queueing more.
+        try {
+          await clearStuckRuns(env.GITHUB_TOKEN)
+        } catch (error) {
+          logError({ message: 'stuck-run check failed', error: String(error) })
+        }
 
         // Catch up anything a dropped fire left behind.
         //
@@ -272,7 +331,7 @@ export default {
         data: `${SITE}/api/`,
         endpoints: {
           'POST /v1/refresh': 'Scrape now. No credential required.',
-          'POST /v1/quotes': 'Latest prices for up to 40 PSX symbols or MUFAP funds, fetched now. See quotes.js.',
+          'POST /v1/quotes': 'Latest prices for up to 40 PSX symbols, MUFAP funds or funds from their managers (AMC) pages, fetched now. See quotes.js.',
           'GET /v1/health': 'Liveness.',
         },
         domains: DOMAINS,
@@ -329,6 +388,7 @@ export default {
     }
 
     const requested = allowed.length === 2 ? 'both' : allowed[0]
+    await clearStuckRuns(env.GITHUB_TOKEN).catch((error) => logError({ message: 'stuck-run check failed', error: String(error) }))
     try {
       await dispatch(requested, env.GITHUB_TOKEN)
     } catch (error) {

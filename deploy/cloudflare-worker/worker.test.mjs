@@ -14,8 +14,8 @@
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { applyThrottle, domainFor, overdueDomains } from './worker.js'
-import { parsePsxCompany, parseMufapTab, handleQuotes, num, isoDate, baseCategory, LIMITS } from './quotes.js'
+import { applyThrottle, domainFor, overdueDomains, stuckRuns, STUCK_MINUTES } from './worker.js'
+import { parsePsxCompany, parseMufapTab, handleQuotes, num, isoDate, baseCategory, LIMITS, parseAmcPage, AMCS, fundNorm, psxQuotes } from './quotes.js'
 
 const at = (iso) => new Date(iso)
 let checks = 0
@@ -203,6 +203,80 @@ await expect(
   globalThis.fetch = real
   assert.deepEqual([blocked.status, blocked.ray, blocked.funds.length, calls], ['blocked', 'abc-LAX', 0, 1])
   checks += 16
+}
+
+/* ── fund managers' own price pages ───────────────────────────────────────────── */
+{
+  const fx = (f) => readFileSync(new URL(`../../tests/fixtures/${f}`, import.meta.url), 'utf8')
+  const ubl = AMCS['UBL Fund Managers Limited']
+  const meezan = AMCS['Al Meezan Investment Management Limited']
+
+  // MUFAP spells it "Al Ameen", UBL "Al-Ameen"; the fund is listed twice on UBL's page.
+  assert.equal(fundNorm('Al-Ameen Islamic Cash Fund'), fundNorm('Al Ameen Islamic Cash Fund'))
+  const u = parseAmcPage(fx('amc_ubl_prices.html'), ubl, ['Al Ameen Islamic Cash Fund', 'UBL Stock Advantage Fund', 'UBL Financial Sector Fund', 'No Such Fund'])
+  const cash = u.find((r) => fundNorm(r.name) === fundNorm('Al Ameen Islamic Cash Fund'))
+  assert.deepEqual([cash.validity_date, cash.price, cash.kind, cash.offer_price], ['2026-11-11', 105.1289, 'repurchase', 108.7558], 'UBL: redemption price and "Applicable on" date')
+  assert.equal(u.length, 3, 'UBL: each wanted fund once; an unknown fund is absent')
+  assert.ok(u.every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.validity_date) && r.price > 0))
+
+  const m = parseAmcPage(fx('amc_meezan_prices.html'), meezan, ['Meezan Islamic Fund', 'KSE Meezan Index Fund', 'Al Meezan Mutual Fund', 'Meezan Rozana Amdani Fund'])
+  const by = Object.fromEntries(m.map((r) => [r.name, r]))
+  assert.deepEqual([by['Meezan Islamic Fund'].validity_date, by['Meezan Islamic Fund'].price, by['Meezan Islamic Fund'].kind], ['2026-11-10', 164.6799, 'repurchase'], 'Meezan: repurchase price')
+  assert.equal(by['KSE Meezan Index Fund'].price, 183.2582)
+  assert.equal(by['Al Meezan Mutual Fund'].price, 50.6503)
+  // A money-market fund quotes no repurchase price (0.0000), only the NAV; and loses its "***".
+  assert.deepEqual([by['Meezan Rozana Amdani Fund'].price, by['Meezan Rozana Amdani Fund'].kind], [50, 'nav'], 'Meezan: NAV where no repurchase price is quoted')
+  assert.equal(parseAmcPage('<html>maintenance</html>', ubl, ['Al Ameen Islamic Cash Fund']).length, 0, 'a page without the table yields nothing, not zeros')
+
+  // Fetch path: one page per manager; a manager not in the registry is reported, not guessed.
+  const real = globalThis.fetch
+  const seen = []
+  globalThis.fetch = async (url) => { seen.push(String(url)); return new Response(fx(String(url).includes('ublfunds') ? 'amc_ubl_prices.html' : 'amc_meezan_prices.html'), { status: 200 }) }
+  const [st, body] = await handleQuotes({ source: 'amc', funds: [
+    { name: 'Al Ameen Islamic Cash Fund', amc: 'UBL Fund Managers Limited' },
+    { name: 'UBL Stock Advantage Fund', amc: 'UBL Fund Managers Limited' },
+    { name: 'Meezan Islamic Fund', amc: 'Al Meezan Investment Management Limited' },
+    { name: 'Some Fund', amc: 'Unlisted AMC Limited' },
+  ] })
+  globalThis.fetch = real
+  assert.equal(st, 200)
+  assert.equal(seen.length, 2, 'one request per manager, not per fund')
+  assert.equal(body.funds.length, 3)
+  assert.deepEqual(body.unsupported, ['Unlisted AMC Limited'])
+  assert.equal((await handleQuotes({ source: 'amc', funds: [] }))[0], 400)
+  checks += 16
+}
+
+/* ── PSX: a timed-out page is asked once more; a 404 is an answer ────────────── */
+{
+  const fx = (f) => readFileSync(new URL(`../../tests/fixtures/${f}`, import.meta.url), 'utf8')
+  const real = globalThis.fetch
+  const tries = {}
+  globalThis.fetch = async (url) => {
+    const sym = String(url).split('/').pop()
+    tries[sym] = (tries[sym] ?? 0) + 1
+    if (sym === 'NOPE') return new Response('', { status: 404 })
+    if (sym === 'SLOW' && tries[sym] === 1) throw new DOMException('timed out', 'TimeoutError')
+    return new Response(fx('psx_company_ogdc.html'), { status: 200 })
+  }
+  const q = await psxQuotes(['OGDC', 'SLOW', 'NOPE'], { retryDelayMs: 0 })
+  globalThis.fetch = real
+  assert.deepEqual(q.map((x) => x.status), ['ok', 'ok', 'not_found'])
+  assert.deepEqual([tries.OGDC, tries.SLOW, tries.NOPE], [1, 2, 1], 'only the failed symbol is retried, once')
+  checks += 2
+}
+
+/* ── stuck runs ─────────────────────────────────────────────────────────────── */
+{
+  const now = Date.parse('2026-11-10T16:00:00Z')
+  const runs = [
+    { id: 1, status: 'waiting', created_at: '2026-11-09T18:00:52Z' },               // the real one
+    { id: 2, status: 'waiting', created_at: new Date(now - 5 * 60000).toISOString() }, // just arrived
+    { id: 3, status: 'in_progress', created_at: '2026-11-09T18:00:52Z' },            // not ours to judge
+  ]
+  assert.deepEqual(stuckRuns(runs, now).map((r) => r.id), [1], `only a run waiting over ${STUCK_MINUTES} minutes`)
+  assert.deepEqual(stuckRuns(undefined, now), [])
+  checks += 2
 }
 
 console.log(`worker: ${checks} checks passed`)
