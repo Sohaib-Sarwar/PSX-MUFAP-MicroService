@@ -63,9 +63,10 @@ jobs:
           ids=$(gh api "repos/${{ github.repository }}/actions/runs?status=waiting&per_page=20" \
             --jq '.workflow_runs[] | select((now - (.created_at | fromdateiso8601)) > 1800) | .id' || true)
           for id in $ids; do
-            echo "cancelling stuck run $id"
-            gh run cancel "$id" -R "${{ github.repository }}" \
-              || gh api -X POST "repos/${{ github.repository }}/actions/runs/$id/force-cancel" \
+            # force-cancel: a plain cancel is accepted (202) but a run parked on an
+            # environment ignores it, as 42670149650 did on 2026-11-10.
+            echo "force-cancelling stuck run $id"
+            gh api -X POST "repos/${{ github.repository }}/actions/runs/$id/force-cancel" \
               || echo "::warning::could not cancel stuck run $id"
           done
           [ -n "$ids" ] || echo "nothing stuck"

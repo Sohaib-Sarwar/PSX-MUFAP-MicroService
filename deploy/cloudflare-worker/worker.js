@@ -237,8 +237,8 @@ export async function clearStuckRuns(token) {
   }
   const cleared = []
   for (const run of stuckRuns((await list.json()).workflow_runs)) {
-    let res = await github(`/actions/runs/${run.id}/cancel`, token, 'POST')
-    if (res.status === 409) res = await github(`/actions/runs/${run.id}/force-cancel`, token, 'POST')
+    // force-cancel: a plain cancel is accepted (202) but a run parked on an environment ignores it.
+    const res = await github(`/actions/runs/${run.id}/force-cancel`, token, 'POST')
     const ok = res.status === 202
     ;(ok ? log : logError)({
       message: ok ? 'cancelled stuck run' : 'could not cancel stuck run',
