@@ -130,8 +130,14 @@ jobs:
       id-token: write
     # One deployment at a time across every caller. Two overlapping publishes
     # make the Pages API reject the second; queueing makes the later one win.
+    #
+    # Renamed from `github-pages-deployment` on 2026-11-10: run 42670149650's
+    # Deploy job has sat in `waiting` since 2026-11-09T18:03Z, holding that
+    # group, and neither cancel nor force-cancel releases it. A new name leaves
+    # it behind. If this ever happens again, rename again (and see the Unblock
+    # job in refresh.yml, which cancels such runs when GitHub lets it).
     concurrency:
-      group: github-pages-deployment
+      group: github-pages-publish
       cancel-in-progress: false
     environment:
       name: github-pages
