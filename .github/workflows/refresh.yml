@@ -37,6 +37,35 @@ on:
         default: true
 
 jobs:
+  # First, and outside every concurrency group, so it runs even when publishing
+  # is blocked: cancel any run stuck in `waiting`. On 2026-11-09 one Deploy job
+  # sat waiting on the github-pages environment for a day (no reviewers, no
+  # timer) and every publish queued behind it was cancelled. Nothing in this
+  # repository waits for approval, so thirty minutes of waiting means stuck.
+  # Done here with the workflow's own token because the worker's token can
+  # dispatch but not cancel; the watchdog does the same on its schedule.
+  unblock:
+    name: Unblock
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel runs stuck waiting
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          ids=$(gh api "repos/${{ github.repository }}/actions/runs?status=waiting&per_page=20" \
+            --jq '.workflow_runs[] | select((now - (.created_at | fromdateiso8601)) > 1800) | .id' || true)
+          for id in $ids; do
+            echo "cancelling stuck run $id"
+            gh run cancel "$id" -R "${{ github.repository }}" \
+              || gh api -X POST "repos/${{ github.repository }}/actions/runs/$id/force-cancel" \
+              || echo "::warning::could not cancel stuck run $id"
+          done
+          [ -n "$ids" ] || echo "nothing stuck"
+
   # A dispatch carries its target in the payload; a manual run carries it in an
   # input; the shorthand event types carry it in their name. All three are
   # resolved once, here, so the jobs below have one thing to read.
