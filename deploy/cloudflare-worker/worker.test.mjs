@@ -13,7 +13,9 @@
  *                  happened — and, more importantly, which it leaves alone
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { applyThrottle, domainFor, overdueDomains } from './worker.js'
+import { parsePsxCompany, parseMufapTab, handleQuotes, num, isoDate, baseCategory, LIMITS } from './quotes.js'
 
 const at = (iso) => new Date(iso)
 let checks = 0
@@ -166,6 +168,41 @@ await expect(
   assert.deepEqual(await overdueDomains(), [], 'an unreadable envelope sweeps up nothing')
   globalThis.fetch = real
   checks += 1
+}
+
+/* ── /v1/quotes parsers, against the repository's captured pages ─────────────── */
+{
+  const fx = (f) => readFileSync(new URL(`../../tests/fixtures/${f}`, import.meta.url), 'utf8')
+  const q = parsePsxCompany(fx('psx_company_ogdc.html'), 'OGDC')
+  assert.equal(q.status, 'ok')
+  assert.equal(q.price, 316.23, 'price from quote__close')
+  assert.equal(q.as_of, '2026-09-24', 'as-of date from quote__date')
+  assert.equal(parsePsxCompany('<html>no quote here</html>', 'XYZ').status, 'no_price', 'a page without a price is not a zero price')
+
+  const want = [{ name: 'ABL Cash Fund', category: 'Money Market' }, { name: 'No Such Fund', category: 'Equity' }]
+  const t1 = parseMufapTab(fx('mufap_tab1.html'), want)
+  assert.deepEqual(t1.map((r) => [r.name, r.nav, r.validity_date]), [['ABL Cash Fund', 10.4862, '2026-09-14']], 'tab=1: NAV and validity; unknown funds are simply absent')
+  const t3 = parseMufapTab(fx('mufap_tab3.html'), want)
+  assert.equal(t3[0].offer_price, 10.5774, 'tab=3: the offer price, not the sales load')
+  assert.equal(t3[0].nav, 10.4862)
+
+  assert.equal(num('(6.21)'), -6.21); assert.equal(num('1,234.50'), 1234.5); assert.equal(num('N/A'), null)
+  assert.equal(isoDate('Nov 06, 2026'), '2026-11-06'); assert.equal(isoDate('Tue, Nov 10, 2026 3:49 PM'), '2026-11-10')
+  assert.equal(baseCategory('VPS-Debt (Annualized Return )'), 'VPS-Debt')
+
+  // Inputs are capped before anything is fetched.
+  assert.equal((await handleQuotes({ source: 'psx', symbols: Array.from({ length: LIMITS.symbols + 1 }, (_, i) => `S${i}`) }))[0], 400)
+  assert.equal((await handleQuotes({ source: 'mufap', tab: 2, funds: want }))[0], 400)
+  assert.equal((await handleQuotes({ source: 'nope' }))[0], 400)
+
+  // A challenge is reported, not retried.
+  const real = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return new Response('challenge', { status: 403, headers: { 'cf-mitigated': 'challenge', 'cf-ray': 'abc-LAX' } }) }
+  const [, blocked] = await handleQuotes({ source: 'mufap', tab: 1, funds: want })
+  globalThis.fetch = real
+  assert.deepEqual([blocked.status, blocked.ray, blocked.funds.length, calls], ['blocked', 'abc-LAX', 0, 1])
+  checks += 16
 }
 
 console.log(`worker: ${checks} checks passed`)

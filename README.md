@@ -379,6 +379,24 @@ GitHub issue per incident, closed automatically on recovery.
 It is weekend-aware: a Friday snapshot read on Sunday is on schedule, because
 the next run genuinely is not due until Monday.
 
+### Latest prices for a few instruments: `POST /v1/quotes`
+
+The fast path, beside the scheduled one. A caller that holds a handful of stocks and funds asks the worker
+for exactly those, and the worker fetches them from the source itself, in seconds, with no GitHub run:
+
+```
+POST https://pk-finance-cron.pk-microservice.workers.dev/v1/quotes
+{ "source": "psx",   "symbols": ["MEBL", "FFC"] }                                      ≤ 40
+{ "source": "mufap", "tab": 1, "funds": [{ "name": "ABL Cash Fund", "category": "Money Market" }] }   ≤ 40, tab 1 or 3
+```
+
+PSX is one company page per symbol; MUFAP is one IndustryStatDaily tab per request (ask for tab 1 and 3
+and keep the newer row per fund), which keeps each call inside the Workers CPU budget. No key: inputs are
+capped and every upstream page sits behind the edge cache (PSX 60 s, MUFAP 10 min). A refusal by the
+source (MUFAP's Cloudflare challenge) comes back as `status: "blocked"` with the ray id and is not retried.
+Fintraxa's Settings > Market prices uses it through its `refresh-prices` Edge Function. Code and tests:
+`deploy/cloudflare-worker/quotes.js`, `worker.test.mjs`. The scheduled jobs below are unchanged.
+
 ### Refresh on demand
 
 The same endpoint the dashboard's **Refresh now** button uses. **No credential

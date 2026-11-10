@@ -44,6 +44,8 @@
  * cmd.exe treats as a command separator.
  */
 
+import { handleQuotes } from './quotes.js'
+
 const OWNER = 'Sohaib-Sarwar'
 const REPO = 'PSX-MUFAP-MicroService'
 const SITE = 'https://sohaib-sarwar.github.io/PSX-MUFAP-MicroService'
@@ -270,6 +272,7 @@ export default {
         data: `${SITE}/api/`,
         endpoints: {
           'POST /v1/refresh': 'Scrape now. No credential required.',
+          'POST /v1/quotes': 'Latest prices for up to 40 PSX symbols or MUFAP funds, fetched now. See quotes.js.',
           'GET /v1/health': 'Liveness.',
         },
         domains: DOMAINS,
@@ -279,6 +282,14 @@ export default {
 
     if (url.pathname === '/v1/health') {
       return json({ status: 'ok', at: new Date().toISOString() })
+    }
+
+    if (url.pathname === '/v1/quotes') {
+      if (request.method !== 'POST') return json({ error: 'POST a JSON body.' }, 405)
+      const payload = await request.json().catch(() => null)
+      const [status, body] = await handleQuotes(payload)
+      log({ message: 'quotes', source: payload?.source, status, ms: body.ms, upstream: body.status })
+      return json(body, status)
     }
 
     if (url.pathname !== '/v1/refresh') {
