@@ -58,7 +58,12 @@ All parsers map columns **by header text** and raise `ColumnMapError` on a misma
   and `?tab=3` (AMC, inception, offer/repurchase, loads, trustee). Joined on (sector, fund name,
   normalised category) — VPS sub-funds share names. NAV and date from whichever tab is newer; prices
   nulled unless they belong to that date (`pick_current_nav`, `returns_as_of`, `prices_as_of`).
-- AMC fallback (worker `/v1/quotes` source `amc` only): UBL and Al Meezan price pages.
+- AMC fallback (worker `/v1/quotes` source `amc` only): UBL, Al Meezan, NBP (`nbpfunds.com/fund-prices/fund-nav-view/`) and Atlas
+  (homepage table; sometimes served without it → `marker` check + one fresh retry). MCB/Alhamra sits behind a Cloudflare challenge: not read
+  here; Fintraxa's refresh-prices reads it through Gemini URL-context.
+- PSX quotes: company page (then `/etf/`), fetched fresh (`_=<minute>`, no Cache API: Cache API calls count toward the free plan's
+  50 subrequests per invocation — that cap was why some stocks failed). Misses, `no_price` and stale pages are filled from ONE
+  `/screener` fetch (all equities; `source: 'screener'`, as_of = newest page date or the PSX session date).
 
 ## Published outputs (base `…/PSX-MUFAP-MicroService/api/`)
 
@@ -144,6 +149,8 @@ All parsers map columns **by header text** and raise `ColumnMapError` on a misma
 ## Change log
 
 Newest first. One line per change: date, commit, what and why.
+
+- 2026-11-22 — `/v1/quotes`: PSX pages bypass the Cache API (50-subrequest cap), 25 s timeout, retry pass, `/screener` fills misses/stale; NBP + Atlas AMC parsers (fixtures `amc_nbp_prices.html`, `amc_atlas_prices.html`); "Nov 21, 2026" dates; error text kept. Deployed (version 99f0ff89); 89 worker checks pass.
 
 - 2026-11-13 — CONTEXT.md created (handoff map for other models/accounts).
 - 2026-11-10 6734de7 — Pages deploy under concurrency group `github-pages-publish` to escape a run stuck in the old group.

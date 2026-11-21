@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { applyThrottle, domainFor, overdueDomains, stuckRuns, STUCK_MINUTES } from './worker.js'
-import { parsePsxCompany, parseMufapTab, handleQuotes, num, isoDate, baseCategory, LIMITS, parseAmcPage, AMCS, fundNorm, psxQuotes } from './quotes.js'
+import { parsePsxCompany, parseMufapTab, handleQuotes, num, isoDate, baseCategory, LIMITS, parseAmcPage, AMCS, fundNorm, psxQuotes, parseScreener, psxSessionDate, amcQuotes } from './quotes.js'
 
 const at = (iso) => new Date(iso)
 let checks = 0
@@ -253,8 +253,11 @@ await expect(
   const real = globalThis.fetch
   const tries = {}
   globalThis.fetch = async (url) => {
-    const sym = String(url).split('/').pop()
+    const u = new URL(String(url))
+    assert.ok(u.searchParams.has('_'), 'PSX pages are fetched with a cache-busting parameter')
+    const sym = u.pathname.split('/').pop()
     tries[sym] = (tries[sym] ?? 0) + 1
+    if (u.pathname === '/screener') return new Response('<table></table>', { status: 200 })
     if (sym === 'NOPE') return new Response('', { status: 404 })
     if (sym === 'SLOW' && tries[sym] === 1) throw new DOMException('timed out', 'TimeoutError')
     return new Response(fx('psx_company_ogdc.html'), { status: 200 })
@@ -262,8 +265,71 @@ await expect(
   const q = await psxQuotes(['OGDC', 'SLOW', 'NOPE'], { retryDelayMs: 0 })
   globalThis.fetch = real
   assert.deepEqual(q.map((x) => x.status), ['ok', 'ok', 'not_found'])
-  assert.deepEqual([tries.OGDC, tries.SLOW, tries.NOPE], [1, 2, 1], 'only the failed symbol is retried, once')
+  assert.deepEqual([tries.OGDC, tries.SLOW, tries.NOPE], [1, 2, 2], 'only the failed symbol is retried, once; a 404 company page also tries /etf/')
+  checks += 3
+}
+
+/* ── PSX: ETFs, the screener for what pages can't give, stale pages ─────────── */
+{
+  const fx = (f) => readFileSync(new URL(`../../tests/fixtures/${f}`, import.meta.url), 'utf8')
+  const ogdc = parsePsxCompany(fx('psx_company_ogdc.html'), 'OGDC')
+  const row = (sym, price, pct) => `<tr><td data-order="${sym}"><a class="tbl__symbol" href="/company/${sym}" data-title="${sym} Ltd"><strong>${sym}</strong></a></td><td>0823</td><td>KSE100</td><td class="right" data-order="51756273197.12">51.8B</td><td class="right" data-order="${price}">${price}</td><td class="right" data-order="${pct}">${pct}%</td></tr>`
+  const screener = `<table><thead><tr><th>SYMBOL</th></tr></thead><tbody>${row('DOWN', 976.84, 1.737)}${row('OLD', 571.3, -0.07)}${row('SAME', 50, 0)}</tbody></table>`
+  const board = parseScreener(screener, ['DOWN', 'OLD', 'MISSING'])
+  assert.deepEqual(board.get('DOWN'), { price: 976.84, change_pct: 1.737 })
+  assert.equal(board.has('MISSING'), false)
   checks += 2
+
+  const real = globalThis.fetch
+  const page = (sym, date, price) => fx('psx_company_ogdc.html').replace(/class="quote__date"[^>]*>[\s\S]*?<\/div>/, `class="quote__date">As of ${date}</div>`).replace(/(class="quote__close"[^>]*>)[^<]*/, `$1Rs.${price}`)
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url))
+    const [, kind, sym] = u.pathname.split('/')
+    if (kind === 'screener') return new Response(screener, { status: 200 })
+    if (sym === 'DOWN') throw new DOMException('timed out', 'TimeoutError')
+    if (sym === 'ETF1') return kind === 'etf' ? new Response(fx('psx_company_ogdc.html'), { status: 200 }) : new Response('<html>no quote</html>', { status: 200 })
+    if (sym === 'OLD') return new Response(page('OLD', 'Fri, Nov 13, 2026 4:48 PM', '569.12'), { status: 200 })
+    if (sym === 'SAME') return new Response(page('SAME', 'Fri, Nov 13, 2026 4:48 PM', '50.00'), { status: 200 })
+    return new Response(page(sym, 'Fri, Nov 20, 2026 4:49 PM', '100.00'), { status: 200 })
+  }
+  const q = await psxQuotes(['NEW', 'DOWN', 'ETF1', 'OLD', 'SAME'], { retryDelayMs: 0 })
+  globalThis.fetch = real
+  const by = Object.fromEntries(q.map((x) => [x.symbol, x]))
+  assert.equal(by.NEW.as_of, '2026-11-20')
+  assert.deepEqual([by.DOWN.status, by.DOWN.price, by.DOWN.source, by.DOWN.as_of], ['ok', 976.84, 'screener', '2026-11-20'], 'a page that never answers comes from the screener, dated the newest session')
+  assert.deepEqual([by.ETF1.status, by.ETF1.page, by.ETF1.price], ['ok', 'etf', ogdc.price], 'an ETF is read from /etf/')
+  assert.deepEqual([by.OLD.price, by.OLD.source, by.OLD.as_of], [571.3, 'screener', '2026-11-20'], 'a stale page is replaced by the screener price')
+  assert.deepEqual([by.SAME.price, by.SAME.source, by.SAME.as_of], [50, undefined, '2026-11-13'], 'a stale page the screener confirms is kept (no trade)')
+  checks += 5
+}
+
+/* ── AMC pages: NBP and Atlas (2026-11-22) ───────────────────────────────────── */
+{
+  const fx = (f) => readFileSync(new URL(`../../tests/fixtures/${f}`, import.meta.url), 'utf8')
+  const nbp = parseAmcPage(fx('amc_nbp_prices.html'), AMCS['NBP Fund Management Limited'], ['NBP Islamic Money Market Fund'])
+  assert.deepEqual(nbp.map((r) => [r.validity_date, r.price, r.kind, r.offer_price]), [['2026-11-21', 10.6425, 'repurchase', 10.7649]], 'NBP: redemption price, "Nov 21, 2026"')
+  const atlas = parseAmcPage(fx('amc_atlas_prices.html'), AMCS['Atlas Asset Management Limited'], ['Atlas Islamic Money Market Fund', 'Atlas Liquid Fund'])
+  assert.deepEqual(atlas.map((r) => [r.name, r.validity_date, r.price]).sort(), [['Atlas Islamic Money Market Fund', '2026-11-20', 529.5327], ['Atlas Liquid Fund', '2026-11-21', 525.4683]], 'Atlas: the homepage table, per-row dates')
+  checks += 2
+
+  // Atlas sometimes serves its homepage without the table: asked once more, never cached without it.
+  const real = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return new Response(calls === 1 ? '<html>no table</html>' : fx('amc_atlas_prices.html'), { status: 200 }) }
+  const r = await amcQuotes([{ name: 'Atlas Islamic Money Market Fund', amc: 'Atlas Asset Management Limited' }])
+  globalThis.fetch = real
+  assert.equal(calls, 2, 'a homepage without the price table is fetched once more')
+  assert.deepEqual([r.managers[0].status, r.funds.length, r.funds[0].price], ['ok', 1, 529.5327])
+  checks += 2
+}
+
+/* ── PSX session date (Karachi) ─────────────────────────────────────────────── */
+{
+  assert.equal(psxSessionDate(new Date('2026-11-20T10:00:00Z')), '2026-11-20', 'Friday afternoon PKT')
+  assert.equal(psxSessionDate(new Date('2026-11-22T06:00:00Z')), '2026-11-20', 'Sunday → Friday')
+  assert.equal(psxSessionDate(new Date('2026-11-23T03:00:00Z')), '2026-11-20', 'Monday 08:00 PKT, before the open → Friday')
+  assert.equal(psxSessionDate(new Date('2026-11-23T05:00:00Z')), '2026-11-23', 'Monday 10:00 PKT')
+  checks += 4
 }
 
 /* ── stuck runs ─────────────────────────────────────────────────────────────── */

@@ -30,6 +30,9 @@ const PSX = 'https://dps.psx.com.pk'
 const MUFAP = 'https://www.mufap.com.pk/Industry/IndustryStatDaily'
 const TTL = { psx: 60, mufap: 600, amc: 600 }
 export const LIMITS = { symbols: 40, funds: 40 }
+/** PSX company pages take 4–13 s under load (measured 2026-11-22); 12 s cut the slow half off. */
+export const PSX_TIMEOUT_MS = 25000
+const SCREENER_TIMEOUT_MS = 30000
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 }
 
 // ── text helpers ────────────────────────────────────────────────────────────
@@ -95,6 +98,34 @@ export function parsePsxCompany(html, symbol) {
   }
 }
 
+/**
+ * /screener (the listed universe, one page) → Map<SYMBOL, { price, change_pct }> for the symbols asked for.
+ * Each row: <td data-order="SYM">…</td> then market cap, PRICE, CHANGE % as data-order values. Cheap on purpose:
+ * only the wanted rows are read. ETFs are not on it.
+ */
+export function parseScreener(html, symbols) {
+  const out = new Map()
+  for (const sym of symbols) {
+    const i = html.indexOf(`<td data-order="${sym}">`)
+    if (i < 0) continue
+    const end = html.indexOf('</tr>', i)
+    const vals = [...html.slice(i, end < 0 ? i + 2000 : end).matchAll(/data-order="([^"]*)"/g)].map((m) => m[1])
+    const price = num(vals[2])
+    if (price === null || price <= 0) continue
+    out.set(sym, { price, change_pct: num(vals[3]) })
+  }
+  return out
+}
+
+/** The PSX session date for a moment, in Karachi: weekends and before 09:30 fall back to the last weekday. */
+export function psxSessionDate(now = new Date()) {
+  const pk = new Date(now.getTime() + 5 * 3600 * 1000)
+  const minutes = pk.getUTCHours() * 60 + pk.getUTCMinutes()
+  if (minutes < 9 * 60 + 30) pk.setUTCDate(pk.getUTCDate() - 1)
+  while (pk.getUTCDay() === 0 || pk.getUTCDay() === 6) pk.setUTCDate(pk.getUTCDate() - 1)
+  return pk.toISOString().slice(0, 10)
+}
+
 // ── MUFAP ───────────────────────────────────────────────────────────────────
 
 /**
@@ -152,9 +183,12 @@ export function parseMufapTab(html, wanted) {
 // the redemption / repurchase price, or the NAV where a fund quotes no separate price.
 
 const dmyDate = (s) => {
+  const iso = (y, mon, d) => (MONTHS[mon.toLowerCase()] ? `${y}-${String(MONTHS[mon.toLowerCase()]).padStart(2, '0')}-${d.padStart(2, '0')}` : null)
   const m = /(\d{1,2})[\s-]+([A-Za-z]{3})[a-z]*[\s-]+(\d{4})/.exec(s ?? '')
-  if (!m || !MONTHS[m[2].toLowerCase()]) return null
-  return `${m[3]}-${String(MONTHS[m[2].toLowerCase()]).padStart(2, '0')}-${m[1].padStart(2, '0')}`
+  if (m) return iso(m[3], m[2], m[1])
+  // "Nov 21, 2026" (NBP)
+  const u = /([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})/.exec(s ?? '')
+  return u ? iso(u[3], u[1], u[2]) : null
 }
 
 /** "Al-Ameen Islamic Cash Fund***" and "Al Ameen Islamic Cash Fund" → "alameenislamiccashfund". */
@@ -170,6 +204,23 @@ export const AMCS = {
     id: 'meezan',
     url: 'https://www.almeezangroup.com/fund-prices/',
     cols: { date: (h) => h === 'validity date', redemption: (h) => h.startsWith('repurchase'), offer: (h) => h.startsWith('offer'), nav: (h) => h.startsWith('nav') },
+  },
+  // 2026-11-22: NBP and Atlas publish server-rendered tables (plain GET, no challenge). MCB's page sits behind a
+  // Cloudflare bot challenge, so MCB / Alhamra funds stay on MUFAP.
+  'NBP Fund Management Limited': {
+    id: 'nbp',
+    url: 'https://www.nbpfunds.com/fund-prices/fund-nav-view/',
+    // Funds | Offer Price | Redemption Price | Date ("Nov 21, 2026"), one row per fund, names in capitals.
+    cols: { date: (h) => h === 'date', redemption: (h) => h.startsWith('redemption'), offer: (h) => h.startsWith('offer') },
+  },
+  'Atlas Asset Management Limited': {
+    id: 'atlas',
+    url: 'https://www.atlasfunds.com.pk/',
+    // The homepage's "Daily Prices": FUND NAME | APPLICABLE DATE (21-Nov-2026) | OFFER | REDEMPTION | NAV | …
+    cols: { date: (h) => h === 'applicable date', redemption: (h) => h === 'redemption', offer: (h) => h === 'offer', nav: (h) => h === 'nav' },
+    // The site sometimes serves the homepage without the table; such a copy is not cached and is asked once more.
+    marker: 'row_id=',
+    timeoutMs: 25000,
   },
 }
 
@@ -234,7 +285,13 @@ export async function amcQuotes(funds) {
   await Promise.all([...byAmc].map(async ([amc, names]) => {
     const def = AMCS[amc]
     try {
-      const r = await cachedText(def.url, TTL.amc, 20000)
+      const opts = { valid: def.marker ? (b) => b.includes(def.marker) : null }
+      let r = await cachedText(def.url, TTL.amc, def.timeoutMs ?? 20000, opts)
+      if (r.invalid) r = await cachedText(def.url, TTL.amc, def.timeoutMs ?? 20000, { ...opts, fresh: true })
+      if (r.invalid) {
+        managers.push({ amc, id: def.id, status: 'unavailable', url: def.url, error: 'The price table was missing from the page.' })
+        return
+      }
       if (!r.body) {
         managers.push({ amc, id: def.id, status: r.challenge ? 'blocked' : 'unavailable', http: r.status, url: def.url })
         return
@@ -255,23 +312,31 @@ const challenged = (res) => res.status === 403 || res.status === 503 || res.head
 
 // ── fetching ────────────────────────────────────────────────────────────────
 
-/** GET through the edge cache: at most one upstream request per URL per `ttl` seconds. */
-async function cachedText(url, ttl, timeoutMs) {
-  const cache = typeof caches !== 'undefined' ? caches.default : null
+/**
+ * GET through the edge cache: at most one upstream request per URL per `ttl` seconds. `fresh` adds a
+ * minute-bucket query parameter to the upstream URL so no intermediate cache can hand back an old copy (a PSX
+ * page once came back days stale for FFC, 2026-11-13 → 20); the edge cache still keys on the URL without it.
+ */
+async function cachedText(url, ttl, timeoutMs, { fresh = false, valid = null, useCache = true } = {}) {
+  // Every Cache API read and write counts as a subrequest (50 per call on the free plan): PSX pages skip it — they are
+  // per-minute fresh anyway — so a page costs one subrequest, not three (2026-11-22: 20 symbols hit the limit).
+  const cache = useCache && typeof caches !== 'undefined' ? caches.default : null
   const cacheKey = new Request(url)
   if (cache) {
     const hit = await cache.match(cacheKey)
     if (hit) return { status: 200, body: await hit.text(), cached: true }
   }
-  const res = await fetch(url, {
-    headers: { 'User-Agent': UA, Accept: 'text/html' },
+  const upstream = fresh ? `${url}${url.includes('?') ? '&' : '?'}_=${Math.floor(Date.now() / 60000)}` : url
+  const res = await fetch(upstream, {
+    headers: { 'User-Agent': UA, Accept: 'text/html', 'Cache-Control': 'no-cache' },
     signal: AbortSignal.timeout(timeoutMs),
-    cf: { cacheTtl: 0 },
+    cf: { cacheTtl: 0, cacheEverything: false },
   })
   if (!res.ok || challenged(res)) {
     return { status: res.status, body: null, ray: res.headers.get('cf-ray'), challenge: challenged(res) }
   }
   const body = await res.text()
+  if (valid && !valid(body)) return { status: 200, body, cached: false, invalid: true }
   if (cache) {
     await cache.put(cacheKey, new Response(body, { headers: { 'Cache-Control': `public, max-age=${ttl}`, 'Content-Type': 'text/html' } }))
   }
@@ -287,28 +352,69 @@ async function pool(items, size, fn) {
   return out
 }
 
+async function psxPage(path, symbol) {
+  const r = await cachedText(`${PSX}/${path}/${encodeURIComponent(symbol)}`, TTL.psx, PSX_TIMEOUT_MS, { fresh: true, useCache: false })
+  if (!r.body) return { symbol, status: r.status === 404 ? 'not_found' : 'unavailable', http: r.status }
+  return { ...parsePsxCompany(r.body, symbol), cached: r.cached }
+}
+
 async function psxOne(symbol) {
   try {
-    const r = await cachedText(`${PSX}/company/${encodeURIComponent(symbol)}`, TTL.psx, 12000)
-    if (!r.body) return { symbol, status: r.status === 404 ? 'not_found' : 'unavailable', http: r.status }
-    return { ...parsePsxCompany(r.body, symbol), cached: r.cached }
+    const q = await psxPage('company', symbol)
+    // ETFs live under /etf/ (PSX redirects /company/MIIETF there); try it when the company page has no quote.
+    if (q.status === 'no_price' || q.status === 'not_found') {
+      const etf = await psxPage('etf', symbol).catch(() => null)
+      if (etf?.status === 'ok') return { ...etf, page: 'etf' }
+    }
+    return q
   } catch (error) {
-    return { symbol, status: 'unavailable', error: String(error?.name ?? error) }
+    return { symbol, status: 'unavailable', error: errorText(error) }
   }
 }
 
+const errorText = (e) => (e?.message ? `${e.name ?? 'Error'}: ${e.message}`.slice(0, 200) : String(e?.name ?? e))
+
 /**
- * Six at a time; a symbol that timed out or got a 5xx is asked once more after the rest, two at
- * a time (PSX's company pages are slow under load, and 2 of 11 failing on 2026-11-10 was that).
- * A 404 or a page without a price is an answer, not a failure, and is not retried.
+ * Every held symbol, as reliably as PSX allows (client report, 2026-11-22: "refresh only updates some stocks"):
+ *  1. company pages, four at a time, 25 s each (they take 4–13 s; 12 s cut the slow ones off);
+ *  2. the ones that timed out or got a 5xx, once more, two at a time;
+ *  3. anything still missing — or a page whose date trails the newest session the others show (a stale copy) —
+ *     from /screener, one page for the whole market, marked `source: 'screener'`.
+ * A 404 or a page without a price is an answer, not a failure.
  */
-export async function psxQuotes(symbols, { retryDelayMs = 800 } = {}) {
-  const first = await pool(symbols, 6, psxOne)
+export async function psxQuotes(symbols, { retryDelayMs = 800, now = () => new Date() } = {}) {
+  const first = await pool(symbols, 4, psxOne)
   const again = first.map((q, i) => (q.status === 'unavailable' ? i : -1)).filter((i) => i >= 0)
-  if (!again.length) return first
-  await new Promise((r) => setTimeout(r, retryDelayMs))
-  const second = await pool(again.map((i) => symbols[i]), 2, psxOne)
-  again.forEach((i, k) => { first[i] = { ...second[k], retried: true } })
+  if (again.length) {
+    await new Promise((r) => setTimeout(r, retryDelayMs))
+    const second = await pool(again.map((i) => symbols[i]), 2, psxOne)
+    again.forEach((i, k) => { first[i] = { ...second[k], retried: true } })
+  }
+  const dates = first.filter((q) => q.status === 'ok' && q.as_of).map((q) => q.as_of).sort()
+  const newest = dates[dates.length - 1] ?? null
+  const need = first.map((q, i) => (q.status === 'unavailable' || q.status === 'no_price' || (q.status === 'ok' && newest && q.as_of && q.as_of < newest) ? i : -1)).filter((i) => i >= 0)
+  if (!need.length) return first
+  let board = null
+  let screenerError = null
+  try {
+    const r = await cachedText(`${PSX}/screener`, TTL.psx, SCREENER_TIMEOUT_MS, { fresh: true, useCache: false })
+    if (r.body) board = parseScreener(r.body, need.map((i) => symbols[i]))
+    else screenerError = `HTTP ${r.status}`
+  } catch (e) { board = null; screenerError = errorText(e) }
+  if (!board?.size) {
+    if (screenerError) for (const i of need) if (first[i].status !== 'ok') first[i] = { ...first[i], screener: screenerError }
+    return first
+  }
+  const session = newest ?? psxSessionDate(now())
+  for (const i of need) {
+    const s = board.get(symbols[i])
+    if (!s) continue
+    const q = first[i]
+    // A stale page whose price the screener confirms stays as it is (the stock simply didn't trade).
+    if (q.status === 'ok' && q.price === s.price) continue
+    const change = s.change_pct === null ? null : Number((s.price - s.price / (1 + s.change_pct / 100)).toFixed(2))
+    first[i] = { symbol: symbols[i], status: 'ok', name: q.name ?? null, price: s.price, change, change_pct: s.change_pct, as_of: session, as_of_text: `PSX screener, ${session}`, source: 'screener', replaced: q.status }
+  }
   return first
 }
 
